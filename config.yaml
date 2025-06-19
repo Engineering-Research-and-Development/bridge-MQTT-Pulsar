@@ -1,0 +1,19 @@
+# Available levels: DEBUG, INFO, SUCCESS, WARNING, ERROR, CRITICAL
+logging:
+  level: "INFO"
+
+mqtt:
+  broker_host: "mosquitto"
+  broker_port: 1883
+  topic_subscribe: "test/data/#"
+  client_id: "bridge-id"
+  keepalive: 60
+ 
+pulsar:
+  service_url: "pulsar://broker:6650"
+
+routing:
+  pulsar_tenant: "public"
+  pulsar_namespace: "default"
+  match_prefix: "test/data"
+  device_index: 2
