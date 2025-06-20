@@ -12,10 +12,23 @@ class PulsarPublisher(Publisher):
     def connect(self) -> bool:
         try:
             self.client = pulsar.Client(self.config['service_url'])
-            logger.success(f"Connected to Pulsar service at {self.config['service_url']}")
+            # If the broker is not available, this call will timeout and raise an exception.
+            self.client.get_topic_partitions('persistent://public/default/non-existent-topic-for-health-check')
+            
+            logger.success(f"Successfully connected to Pulsar service at {self.config['service_url']}")
             return True
+        except (pulsar.ConnectError, pulsar.Timeout) as e:
+            logger.critical(
+                f"Pulsar connection failed: Could not reach broker at {self.config['service_url']}. "
+                f"Error: {e.__class__.__name__}. Check configuration or broker status."
+            )
+            if self.client:
+                self.client.close()
+            return False
         except Exception:
-            logger.exception("Couldn't connect to Pulsar service")
+            logger.exception("An unexpected error occurred while connecting to Pulsar")
+            if self.client:
+                self.client.close()
             return False
     
     def _get_producer(self, topic: str) -> pulsar.Producer | None:
