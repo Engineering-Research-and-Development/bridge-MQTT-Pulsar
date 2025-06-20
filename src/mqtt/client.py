@@ -1,3 +1,4 @@
+import socket
 import paho.mqtt.client as mqtt
 from loguru import logger
 
@@ -24,16 +25,26 @@ class MqttClientManager:
             logger.warning(f"Unexpected MQTT disconnection. Reason code: {reason_code}")  
 
     def connect(self):
+        if not self.on_message_callback:
+            logger.error("on_message_callback is not set. Messages can't be processed.")
+            return False
         try:
-            if self.on_message_callback:
-                self.client.on_message = self.on_message_callback
-            else:
-                logger.error("MQTT on_message_callback is not set. Messages can't be processed.")
-                return False
-            self.client.connect(self.config['broker_host'], self.config['broker_port'], self.config['keepalive'])
+            self.client.on_message = self.on_message_callback
+            logger.info(f"Attempting to connect to MQTT broker at {self.config['broker_host']}...")
+            self.client.connect(
+                self.config['broker_host'],
+                self.config['broker_port'],
+                self.config['keepalive']
+            )
             return True
-        except (OSError, Exception):
-            logger.exception("Failed to initiate connection to MQTT broker.")
+        except (socket.gaierror, ConnectionRefusedError, TimeoutError) as e:
+            logger.critical(
+                f"MQTT connection failed: Could not reach broker at {self.config['broker_host']}:{self.config['broker_port']}. "
+                f"Error: {e}. Check configuration or broker status."
+            )
+            return False 
+        except Exception:
+            logger.exception("An unexpected, non-connection error occurred during MQTT setup")
             return False
 
     def start_listening(self):
