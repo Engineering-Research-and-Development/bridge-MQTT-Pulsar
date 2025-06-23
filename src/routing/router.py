@@ -1,5 +1,5 @@
 from loguru import logger
-from ..interfaces import TopicRouter
+from .interfaces import TopicRouter
 
 class DeviceTopicRouter(TopicRouter):
     def __init__(self, config: dict):

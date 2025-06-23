@@ -1,6 +1,7 @@
 import pulsar
 from loguru import logger
-from ..interfaces import Publisher, TopicRouter
+from .interfaces import Publisher
+from ..routing.interfaces import TopicRouter
 
 class PulsarPublisher(Publisher):
     def __init__(self, config: dict, router: TopicRouter):
