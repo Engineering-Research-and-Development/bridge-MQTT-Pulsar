@@ -1,35 +1,26 @@
 from loguru import logger
+import asyncio
 from .pulsar.interfaces import Publisher
 from .mqtt.client import MqttClientManager
+from .mqtt.interfaces import MessageSource
 
-class MqttPulsarOrchestrator:
-    def __init__(self, mqtt_manager: MqttClientManager, publisher: Publisher):
-        self.mqtt_manager = mqtt_manager
+class BridgeOrchestrator:
+    def __init__(self, sources: list[MessageSource], publisher: Publisher):
+        self.sources = sources
         self.publisher = publisher
     
-    def run(self):
+    async def run(self):
         logger.info("Starting MQTT -> Pulsar bridge...")
 
-        if not self.publisher.connect():
-            logger.critical("Critical Pulsar initialization error. Exiting.")
-            return
-        
-        self.mqtt_manager.on_message_callback = self.publisher.publish
+        for source in self.sources:
+            await source.connect()
 
-        if not self.mqtt_manager.connect():
-            logger.critical("Couldn't connect to the MQTT Broker on startup. Check the address and restart.")
-            self.stop()
-            return
+        tasks = [asyncio.create_task(source.start_listening()) for source in self.sources]
+        await asyncio.gather(*tasks)
 
-        try:
-            self.mqtt_manager.start_listening()
-        except KeyboardInterrupt:
-            logger.info("Keyboard interruption detected. Shutting down...")
-        finally:
-            self.stop()
-
-    def stop(self):
+    async def stop(self):
         logger.info("Shutting down the bridge...")
-        self.mqtt_manager.stop()
+        for source in self.sources:
+            await source.stop()
         self.publisher.stop()
         logger.success("Bridge shut down successfully")

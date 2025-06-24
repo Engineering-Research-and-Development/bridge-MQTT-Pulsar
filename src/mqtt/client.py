@@ -1,8 +1,10 @@
 import socket
+import asyncio
 import paho.mqtt.client as mqtt
 from loguru import logger
+from .interfaces import MessageSource
 
-class MqttClientManager:
+class MqttClientManager(MessageSource):
     def __init__(self, config: dict):
         self.config = config
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=self.config['client_id'])
@@ -24,7 +26,7 @@ class MqttClientManager:
         else:
             logger.warning(f"Unexpected MQTT disconnection. Reason code: {reason_code}")  
 
-    def connect(self):
+    async def connect(self):
         if not self.on_message_callback:
             logger.error("on_message_callback is not set. Messages can't be processed.")
             return False
@@ -47,10 +49,11 @@ class MqttClientManager:
             logger.exception("An unexpected, non-connection error occurred during MQTT setup")
             return False
 
-    def start_listening(self):
-        self.client.loop_forever()
+    async def start_listening(self):
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self.client.loop_forever)
 
-    def stop(self):
+    async def stop(self):
         try:
             self.client.loop_stop()
             self.client.disconnect()

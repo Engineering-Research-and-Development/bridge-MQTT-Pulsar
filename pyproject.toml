@@ -23,6 +23,7 @@ dependencies = [
     "pulsar-client",
     "loguru",
     "PyYAML",
+    "asyncua",
 ]
 
 [tool.setuptools.packages.find]

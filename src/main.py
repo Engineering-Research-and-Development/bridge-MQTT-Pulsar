@@ -1,12 +1,13 @@
 import sys
 import os
 import yaml
+import asyncio
 from loguru import logger
 
-from .orchestrator import MqttPulsarOrchestrator
+from .orchestrator import BridgeOrchestrator
 from .mqtt.client import MqttClientManager
 from .pulsar.publisher import PulsarPublisher
-from .routing.router import MqttTopicRouter
+from .routing.MqttTopicRouter import MqttTopicRouter
 
 def load_config(path: str='config.yaml'):
     config_path = os.path.join(os.getcwd(), path)
@@ -35,8 +36,8 @@ def main():
     topic_router = MqttTopicRouter(config.get('routing', {}))
     publisher = PulsarPublisher(config['pulsar'], router=topic_router)
     
-    bridge = MqttPulsarOrchestrator(mqtt_manager, publisher=publisher)
-    bridge.run()
+    bridge = BridgeOrchestrator(mqtt_manager, publisher=publisher)
+    asyncio.run(bridge.run())
 
 if __name__ == "__main__":
     main()
