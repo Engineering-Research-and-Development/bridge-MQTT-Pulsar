@@ -6,7 +6,7 @@ from loguru import logger
 from .orchestrator import MqttPulsarOrchestrator
 from .mqtt.client import MqttClientManager
 from .pulsar.publisher import PulsarPublisher
-from .routing.router import DeviceTopicRouter
+from .routing.router import MqttTopicRouter
 
 def load_config(path: str='config.yaml'):
     config_path = os.path.join(os.getcwd(), path)
@@ -32,7 +32,7 @@ def main():
     logger.info(f"Logger level set to: {log_level}")
 
     mqtt_manager = MqttClientManager(config['mqtt'])
-    topic_router = DeviceTopicRouter(config.get('routing', {}))
+    topic_router = MqttTopicRouter(config.get('routing', {}))
     publisher = PulsarPublisher(config['pulsar'], router=topic_router)
     
     bridge = MqttPulsarOrchestrator(mqtt_manager, publisher=publisher)

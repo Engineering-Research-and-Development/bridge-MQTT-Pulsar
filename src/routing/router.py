@@ -1,7 +1,8 @@
 from loguru import logger
 from .interfaces import TopicRouter
 
-class DeviceTopicRouter(TopicRouter):
+class MqttTopicRouter(TopicRouter):
+    """A topic routing strategy for MQTT messages based on topic structure."""
     def __init__(self, config: dict):
         # eg: persistent://<tenant>/<namespace>/<device_name>
         self.tenant = config.get('pulsar_tenant', 'public')
