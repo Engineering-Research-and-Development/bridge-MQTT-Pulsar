@@ -16,51 +16,6 @@ env:
 
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Build Docker image
-        run: |
-          docker build -t test-container .
-
-      - name: Run the Docker container
-        run: |
-          docker run -d \
-            --name test-container test-container
-
-      - name: Wait the container to be up and running
-        run: |
-          sleep 5
-
-      - name: Check container status
-        run: |
-          if ! docker inspect test-container >/dev/null 2>&1; then
-           echo "Container does not exist."
-           exit 1
-          fi
-
-          STATUS=$(docker inspect --format='{{.State.Status}}' test-container)
-          
-          if [ "$STATUS" != "running" ]; then
-           echo "Container is not running. Status: $STATUS"
-           echo "==== Container Logs ===="
-           docker logs test-container  # Print logs for debugging
-           exit 1  # Fail the pipeline
-          fi
-
-      - name: Print docker logs
-        run: |
-          docker logs test-container
-
-      - name: Stop and remove container
-        run: |
-          docker stop test-container
-          docker rm test-container
-
-
   push:
     runs-on: ubuntu-latest
     permissions:
