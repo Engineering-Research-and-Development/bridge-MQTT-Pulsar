@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 
+
 class TopicRouter(ABC):
     @abstractmethod
     def get_pulsar_topic(self, mqtt_topic: str) -> str | None:

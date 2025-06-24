@@ -1,0 +1,63 @@
+name: Python Lint and Security Middleware
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  check_with_black:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false  # Prevents pushing directly to protected branches
+
+      - name: Run Black
+        uses: psf/black@stable
+        with:
+          options: "."
+          src: './src/'
+
+      - name: Commit and Create Pull Request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "Apply Black formatting"
+          branch: "black-auto-format"
+          delete-branch: true
+          title: "Auto-format code with Black"
+          body: "This PR contains automatic formatting fixes applied by Black."
+          labels: "auto-format, black"
+          assignees: ${{ github.actor }}
+
+  lint_tools:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12"]
+
+    name: Linting
+    steps:
+      - name: Check out source repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python environment ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff bandit
+
+      - name: Run Ruff
+        run: |
+          cd src/
+          python -m ruff check .
+          python -m ruff format --check .
+
+      - name: Run bandit
+        run: |
+          cd src/       
+          python -m bandit -c bandit.yaml b-r .

@@ -3,6 +3,7 @@ from loguru import logger
 from .interfaces import Publisher
 from ..routing.interfaces import TopicRouter
 
+
 class PulsarPublisher(Publisher):
     def __init__(self, config: dict, router: TopicRouter):
         self.config = config
@@ -12,11 +13,15 @@ class PulsarPublisher(Publisher):
 
     def connect(self) -> bool:
         try:
-            self.client = pulsar.Client(self.config['service_url'])
+            self.client = pulsar.Client(self.config["service_url"])
             # If the broker is not available, this call will timeout and raise an exception.
-            self.client.get_topic_partitions('persistent://public/default/non-existent-topic-for-health-check')
-            
-            logger.success(f"Successfully connected to Pulsar service at {self.config['service_url']}")
+            self.client.get_topic_partitions(
+                "persistent://public/default/non-existent-topic-for-health-check"
+            )
+
+            logger.success(
+                f"Successfully connected to Pulsar service at {self.config['service_url']}"
+            )
             return True
         except (pulsar.ConnectError, pulsar.Timeout) as e:
             logger.critical(
@@ -31,15 +36,15 @@ class PulsarPublisher(Publisher):
             if self.client:
                 self.client.close()
             return False
-    
+
     def _get_producer(self, topic: str) -> pulsar.Producer | None:
         if topic in self.producers:
             return self.producers[topic]
-        
+
         if not self.client:
             logger.error("Pulsar client is not connected. Cannot create new producer.")
             return None
-        
+
         try:
             producer = self.client.create_producer(topic)
             self.producers[topic] = producer
@@ -54,17 +59,23 @@ class PulsarPublisher(Publisher):
 
         if not pulsar_topic:
             return
-        
+
         producer = self._get_producer(pulsar_topic)
 
         if not producer:
-            logger.error(f"Could not get a producer for topic '{pulsar_topic}'. Message dropped.")
+            logger.error(
+                f"Could not get a producer for topic '{pulsar_topic}'. Message dropped."
+            )
             return
 
         try:
-            payload_str = msg.payload.decode('utf-8', errors='replace')
-            logger.debug(f"MQTT < Topic: {msg.topic} | Forwarding {payload_str} to Pulsar > Topic: {pulsar_topic}")
-            logger.info(f"Forwarding message from MQTT topic '{msg.topic}' to Pulsar topic '{pulsar_topic}'")
+            payload_str = msg.payload.decode("utf-8", errors="replace")
+            logger.debug(
+                f"MQTT < Topic: {msg.topic} | Forwarding {payload_str} to Pulsar > Topic: {pulsar_topic}"
+            )
+            logger.info(
+                f"Forwarding message from MQTT topic '{msg.topic}' to Pulsar topic '{pulsar_topic}'"
+            )
             producer.send(msg.payload)
         except Exception as e:
             logger.exception(f"Error while sending message to Pulsar: {e}")

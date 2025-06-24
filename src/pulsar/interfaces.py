@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 
+
 class Publisher(ABC):
     @abstractmethod
     def connect(self) -> bool:
