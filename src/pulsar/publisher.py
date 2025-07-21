@@ -69,6 +69,19 @@ class PulsarPublisher(Publisher):
             )
             raise
 
+    def _send_to_dlq(self, msg):
+        dlq_topic = self.config.get('publishing', {}).get('dlq_topic')
+        if not dlq_topic:
+            logger.error(f"DLQ topic not configured. Message from topic '{msg.topic}' will be lost.")
+            return
+
+        try:
+            dlq_producer = self.client.create_producer(dlq_topic)
+            self.retrier.call(self._send_message, dlq_producer, msg.payload)
+            logger.warning(f"Message from topic '{msg.topic}' successfully sent to DLQ '{dlq_topic}'.")
+        except Exception:
+            logger.critical(f"CRITICAL: Failed to send message from topic '{msg.topic}' to DLQ '{dlq_topic}'. DATA LOSS OCCURRED.")
+
     def publish(self, client, userdata, msg):
         pulsar_topic = self.router.get_pulsar_topic(msg.topic)
 
@@ -91,7 +104,7 @@ class PulsarPublisher(Publisher):
                 f"Message from topic '{msg.topic}' could not be delivered to Pulsar after all attempts. "
                 "Forwarding to Dead Letter Queue."
             )
-            # TODO: Add dead letter queue here
+            self._send_to_dlq(msg)
         except Exception:
             logger.exception(f"An unexpected, non-retryable error occurred during message publishing for topic '{msg.topic}'")
 
