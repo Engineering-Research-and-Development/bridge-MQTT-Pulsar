@@ -1,5 +1,6 @@
 import pulsar
 from loguru import logger
+from tenacity import Retrying, stop_after_attempt, wait_exponential, RetryError
 from .interfaces import Publisher
 from ..routing.interfaces import TopicRouter
 
@@ -9,6 +10,13 @@ class PulsarPublisher(Publisher):
         self.client: pulsar.Client | None = None
         self.producers: dict[str, pulsar.Producer] = {}
         self.router = router
+
+        publishing_config = self.config.get('publishing', {})
+        self.retrier = Retrying(
+            stop=stop_after_attempt(publishing_config.get('retry_attempts', 5)),
+            wait=wait_exponential(multiplier=1, min=2, max=10),
+            reraise=True
+        )
 
     def connect(self) -> bool:
         try:
@@ -49,6 +57,18 @@ class PulsarPublisher(Publisher):
             logger.exception(f"Failed to create producer for topic: {topic}")
             return None
 
+    def _send_message(self, producer: pulsar.Producer, msg: pulsar.Message):
+        try:
+            logger.debug(f"Attempting to send message to Pulsar topic '{producer.topic()}'...")
+            producer.send(msg.payload)
+            logger.success(f"Message successfully sent to Pulsar topic '{producer.topic()}'.")
+        except Exception as e:
+            logger.warning(
+                f"Failed to send message to Pulsar topic '{producer.topic()}'. "
+                f"Error: {e.__class__.__name__}. Retrying..."
+            )
+            raise
+
     def publish(self, client, userdata, msg):
         pulsar_topic = self.router.get_pulsar_topic(msg.topic)
 
@@ -65,9 +85,15 @@ class PulsarPublisher(Publisher):
             payload_str = msg.payload.decode('utf-8', errors='replace')
             logger.debug(f"MQTT < Topic: {msg.topic} | Forwarding {payload_str} to Pulsar > Topic: {pulsar_topic}")
             logger.info(f"Forwarding message from MQTT topic '{msg.topic}' to Pulsar topic '{pulsar_topic}'")
-            producer.send(msg.payload)
-        except Exception as e:
-            logger.exception(f"Error while sending message to Pulsar: {e}")
+            self.retrier.call(self._send_message, producer, msg)
+        except RetryError:
+            logger.critical(
+                f"Message from topic '{msg.topic}' could not be delivered to Pulsar after all attempts. "
+                "Forwarding to Dead Letter Queue."
+            )
+            # TODO: Add dead letter queue here
+        except Exception:
+            logger.exception(f"An unexpected, non-retryable error occurred during message publishing for topic '{msg.topic}'")
 
     def stop(self):
         logger.info("Closing all Pulsar producers...")
