@@ -8,11 +8,12 @@ from .mqtt.client import MqttClientManager
 from .pulsar.publisher import PulsarPublisher
 from .routing.router import DeviceTopicRouter
 
-def load_config(path: str='config.yaml'):
+
+def load_config(path: str = "config.yaml"):
     config_path = os.path.join(os.getcwd(), path)
 
     try:
-        with open(config_path, 'r') as f:
+        with open(config_path, "r") as f:
             config = yaml.safe_load(f)
             logger.info("Config loaded succesfully.")
             return config
@@ -23,20 +24,22 @@ def load_config(path: str='config.yaml'):
         logger.critical(f"Syntax error in YAML file '{config_path}': {e}")
         exit(1)
 
-def main():
-    config = load_config('config.yaml')
 
-    log_level = config.get('logging', {}).get('level', 'INFO').upper()
+def main():
+    config = load_config("config.yaml")
+
+    log_level = config.get("logging", {}).get("level", "INFO").upper()
     logger.remove()
     logger.add(sys.stderr, level=log_level, colorize=True)
     logger.info(f"Logger level set to: {log_level}")
 
-    mqtt_manager = MqttClientManager(config['mqtt'])
-    topic_router = DeviceTopicRouter(config.get('routing', {}))
-    publisher = PulsarPublisher(config['pulsar'], router=topic_router)
-    
+    mqtt_manager = MqttClientManager(config["mqtt"])
+    topic_router = DeviceTopicRouter(config.get("routing", {}))
+    publisher = PulsarPublisher(config["pulsar"], router=topic_router)
+
     bridge = MqttPulsarOrchestrator(mqtt_manager, publisher=publisher)
     bridge.run()
+
 
 if __name__ == "__main__":
     main()
