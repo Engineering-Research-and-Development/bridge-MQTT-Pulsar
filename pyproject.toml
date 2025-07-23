@@ -23,6 +23,7 @@ dependencies = [
     "pulsar-client",
     "loguru",
     "PyYAML",
+    "tenacity",
 ]
 
 [tool.setuptools.packages.find]
