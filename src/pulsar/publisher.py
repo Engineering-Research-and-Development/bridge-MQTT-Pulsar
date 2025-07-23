@@ -17,6 +17,8 @@ class PulsarPublisher(Publisher):
             stop=stop_after_attempt(publishing_config.get("retry_attempts", 5)),
             wait=wait_exponential(multiplier=1, min=2, max=10),
         )
+        self.dlq_topic = publishing_config.get("dlq_topic")
+        self.dlq_producer: pulsar.Producer | None = None
 
     def connect(self) -> bool:
         try:
@@ -25,6 +27,12 @@ class PulsarPublisher(Publisher):
             self.client.get_topic_partitions(
                 "persistent://public/default/non-existent-topic-for-health-check"
             )
+
+            if self.dlq_topic:
+                self.dlq_producer = self.client.create_producer(self.dlq_topic)
+                logger.info(
+                    f"Successfully created DLQ producer for topic: {self.dlq_topic}"
+                )
 
             logger.success(
                 f"Successfully connected to Pulsar service at {self.config['service_url']}"
@@ -93,22 +101,24 @@ class PulsarPublisher(Publisher):
             raise
 
     def _send_to_dlq(self, msg):
-        dlq_topic = self.config.get("publishing", {}).get("dlq_topic")
-        if not dlq_topic:
+        if not self.dlq_producer:
             logger.error(
-                f"DLQ topic not configured. Message from topic '{msg.topic}' will be lost."
+                f"DLQ producer is not available. Message from topic '{msg.topic}' will be lost."
             )
             return
 
         try:
-            dlq_producer = self.client.create_producer(dlq_topic)
-            self.retrier(self._send_message, dlq_producer, msg.payload)
+            properties = {
+                "original_topic": msg.topic,
+                "failure_reason": "Max retries exceeded",
+            }
+            self.dlq_producer.send(msg.payload, properties=properties)
             logger.warning(
-                f"Message from topic '{msg.topic}' successfully sent to DLQ '{dlq_topic}'."
+                f"Message from topic '{msg.topic}' successfully sent to DLQ '{self.dlq_topic}'."
             )
         except Exception:
             logger.critical(
-                f"CRITICAL: Failed to send message from topic '{msg.topic}' to DLQ '{dlq_topic}'. DATA LOSS OCCURRED."
+                f"CRITICAL: Failed to send message from topic '{msg.topic}' to DLQ '{self.dlq_topic}'. DATA LOSS OCCURRED."
             )
 
     def publish(self, client, userdata, msg):
