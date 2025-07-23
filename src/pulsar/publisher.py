@@ -16,7 +16,6 @@ class PulsarPublisher(Publisher):
         self.retrier = Retrying(
             stop=stop_after_attempt(publishing_config.get("retry_attempts", 5)),
             wait=wait_exponential(multiplier=1, min=2, max=10),
-            reraise=True,
         )
 
     def connect(self) -> bool:
@@ -45,6 +44,19 @@ class PulsarPublisher(Publisher):
                 self.client.close()
             return False
 
+    def _create_producer(self, topic: str) -> pulsar.Producer:
+        logger.debug(f"Attempting to create producer for Pulsar topic '{topic}'...")
+        try:
+            producer = self.client.create_producer(topic)
+            logger.info(f"Created new Pulsar producer for topic: {topic}")
+            return producer
+        except Exception as e:
+            logger.warning(
+                f"Failed attempt to create producer for Pulsar topic '{topic}'. "
+                f"Error: {e.__class__.__name__}. Retrying...."
+            )
+            raise
+
     def _get_producer(self, topic: str) -> pulsar.Producer | None:
         if topic in self.producers:
             return self.producers[topic]
@@ -54,12 +66,14 @@ class PulsarPublisher(Publisher):
             return None
 
         try:
-            producer = self.client.create_producer(topic)
+            producer = self.retrier(self._create_producer, topic)
             self.producers[topic] = producer
-            logger.info(f"Created new Pulsar producer for topic: {topic}")
             return producer
-        except Exception:
-            logger.exception(f"Failed to create producer for topic: {topic}")
+        except RetryError as e:
+            logger.critical(
+                f"Could not create a producer for topic '{topic}' after max attempts. "
+                f"Final error: {e}. This may indicate a persistent Pulsar issue."
+            )
             return None
 
     def _send_message(self, producer: pulsar.Producer, msg: pulsar.Message):
@@ -107,8 +121,9 @@ class PulsarPublisher(Publisher):
 
         if not producer:
             logger.error(
-                f"Could not get a producer for topic '{pulsar_topic}'. Message dropped."
+                f"Could not get a producer for topic '{pulsar_topic}'. Forwarding to Dead Letter Queue."
             )
+            self._send_to_dlq(msg)
             return
 
         try:
