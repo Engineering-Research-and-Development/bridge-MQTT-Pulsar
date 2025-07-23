@@ -88,7 +88,7 @@ class PulsarPublisher(Publisher):
 
         try:
             dlq_producer = self.client.create_producer(dlq_topic)
-            self.retrier.call(self._send_message, dlq_producer, msg.payload)
+            self.retrier(self._send_message, dlq_producer, msg.payload)
             logger.warning(
                 f"Message from topic '{msg.topic}' successfully sent to DLQ '{dlq_topic}'."
             )
@@ -119,7 +119,7 @@ class PulsarPublisher(Publisher):
             logger.info(
                 f"Forwarding message from MQTT topic '{msg.topic}' to Pulsar topic '{pulsar_topic}'"
             )
-            self.retrier.call(self._send_message, producer, msg)
+            self.retrier(self._send_message, producer, msg)
         except RetryError:
             logger.critical(
                 f"Message from topic '{msg.topic}' could not be delivered to Pulsar after all attempts. "
