@@ -11,6 +11,10 @@ mqtt:
  
 pulsar:
   service_url: "pulsar://broker:6650"
+  
+  publishing:
+    retry_attempts: 5
+    dlq_topic: "persistent://public/default/pulsar-bridge-dlq"
 
 routing:
   pulsar_tenant: "public"
