@@ -84,12 +84,12 @@ class PulsarPublisher(Publisher):
             )
             return None
 
-    def _send_message(self, producer: pulsar.Producer, msg: pulsar.Message):
+    def _send_message(self, producer: pulsar.Producer, payload: bytes):
         try:
             logger.debug(
                 f"Attempting to send message to Pulsar topic '{producer.topic()}'..."
             )
-            producer.send(msg.payload)
+            producer.send(payload)
             logger.success(
                 f"Message successfully sent to Pulsar topic '{producer.topic()}'."
             )
@@ -100,29 +100,38 @@ class PulsarPublisher(Publisher):
             )
             raise
 
-    def _send_to_dlq(self, msg):
+    def _send_to_dlq(self, msg: dict):
         if not self.dlq_producer:
             logger.error(
-                f"DLQ producer is not available. Message from topic '{msg.topic}' will be lost."
+                f"DLQ producer is not available. Message from topic '{msg.get('source')}' will be lost."
             )
             return
 
         try:
             properties = {
-                "original_topic": msg.topic,
-                "failure_reason": "Max retries exceeded",
+                "original_source": msg.get("source"),
+                "original_topic": msg.get("topic", "N/A"),
+                "failure_reason": "Max retries exceeded or producer creation failed",
             }
-            self.dlq_producer.send(msg.payload, properties=properties)
+            payload = msg.get("payload", b"")
+            self.dlq_producer.send(payload, properties=properties)
             logger.warning(
-                f"Message from topic '{msg.topic}' successfully sent to DLQ '{self.dlq_topic}'."
+                f"Message from topic '{msg.get('topic')}' successfully sent to DLQ '{self.dlq_topic}'."
             )
         except Exception:
             logger.critical(
-                f"CRITICAL: Failed to send message from topic '{msg.topic}' to DLQ '{self.dlq_topic}'. DATA LOSS OCCURRED."
+                f"CRITICAL: Failed to send message from topic '{msg.get('topic')}' to DLQ '{self.dlq_topic}'. DATA LOSS OCCURRED."
             )
 
-    def publish(self, client, userdata, msg):
-        pulsar_topic = self.router.get_pulsar_topic(msg.topic)
+    def publish(self, msg: dict):
+        source_topic = msg.get("topic")
+        payload = msg.get("payload")
+
+        if not source_topic or payload is None:
+            logger.warning(f"Received an invalid message format: {msg}")
+            return
+
+        pulsar_topic = self.router.get_pulsar_topic(source_topic)
 
         if not pulsar_topic:
             return
@@ -137,23 +146,19 @@ class PulsarPublisher(Publisher):
             return
 
         try:
-            payload_str = msg.payload.decode("utf-8", errors="replace")
-            logger.debug(
-                f"MQTT < Topic: {msg.topic} | Forwarding {payload_str} to Pulsar > Topic: {pulsar_topic}"
-            )
             logger.info(
-                f"Forwarding message from MQTT topic '{msg.topic}' to Pulsar topic '{pulsar_topic}'"
+                f"Forwarding message from '{msg.get('source')}' topic '{source_topic}' to Pulsar topic '{pulsar_topic}'"
             )
-            self.retrier(self._send_message, producer, msg)
-        except RetryError:
+            self.retrier(self._send_message, producer, payload)
+        except RetryError as e:
             logger.critical(
-                f"Message from topic '{msg.topic}' could not be delivered to Pulsar after all attempts. "
-                "Forwarding to Dead Letter Queue."
+                f"Message from topic '{source_topic}' could not be delivered to Pulsar after all attempts. "
+                f"Final error: {e}. Forwarding to Dead Letter Queue."
             )
             self._send_to_dlq(msg)
         except Exception:
             logger.exception(
-                f"An unexpected, non-retryable error occurred during message publishing for topic '{msg.topic}'"
+                f"An unexpected, non-retryable error occurred during message publishing for topic '{source_topic}'"
             )
 
     def stop(self):
@@ -164,6 +169,13 @@ class PulsarPublisher(Publisher):
                 producer.close()
             except Exception:
                 logger.warning(f"Error closing producer for topic {topic}")
+
+        if self.dlq_producer:
+            try:
+                self.dlq_producer.close()
+            except Exception:
+                logger.warning(f"Error closing DLQ producer for topic {self.dlq_topic}")
+
         if self.client:
             try:
                 self.client.close()

@@ -3,8 +3,8 @@ import os
 import yaml
 from loguru import logger
 
-from .orchestrator import MqttPulsarOrchestrator
-from .sources.MqttSource import MqttClientManager
+from .BridgeOrchestrator import BridgeOrchestrator
+from .sources.MqttSource import MqttSource
 from .pulsar.publisher import PulsarPublisher
 from .routing.router import DeviceTopicRouter
 
@@ -33,11 +33,11 @@ def main():
     logger.add(sys.stderr, level=log_level, colorize=True)
     logger.info(f"Logger level set to: {log_level}")
 
-    mqtt_manager = MqttClientManager(config["mqtt"])
+    mqtt_source = MqttSource(config["mqtt"])
     topic_router = DeviceTopicRouter(config.get("routing", {}))
     publisher = PulsarPublisher(config["pulsar"], router=topic_router)
 
-    bridge = MqttPulsarOrchestrator(mqtt_manager, publisher=publisher)
+    bridge = BridgeOrchestrator(sources=[mqtt_source], publisher=publisher)
     bridge.run()
 
 
