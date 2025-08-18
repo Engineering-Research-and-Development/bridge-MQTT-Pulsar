@@ -1,6 +1,6 @@
 from loguru import logger
 from .pulsar.interfaces import Publisher
-from .mqtt.client import MqttClientManager
+from .sources.MqttSource import MqttClientManager
 
 
 class MqttPulsarOrchestrator:

@@ -1,9 +1,12 @@
 import socket
+import threading
 import paho.mqtt.client as mqtt
 from loguru import logger
 
+from .interfaces import IMessageSource, MessageCallback
 
-class MqttClientManager:
+
+class MqttSource(IMessageSource):
     def __init__(self, config: dict):
         self.config = config
         self.client = mqtt.Client(
@@ -11,7 +14,8 @@ class MqttClientManager:
         )
         self.client.on_connect = self._on_connect
         self.client.on_disconnect = self._on_disconnect
-        self.on_message_callback = None
+        self._on_message_callback: MessageCallback | None = None
+        self._thread: threading.Thread | None = None
 
     def _on_connect(self, client, userdata, flags, reason_code, properties):
         if reason_code == 0:
@@ -31,12 +35,19 @@ class MqttClientManager:
         else:
             logger.warning(f"Unexpected MQTT disconnection. Reason code: {reason_code}")
 
-    def connect(self):
-        if not self.on_message_callback:
-            logger.error("on_message_callback is not set. Messages can't be processed.")
-            return False
+    def _internal_on_message(self, client, userdata, msg):
+        """Internal callback that works as an adapter and translator between Source and Publisher."""
+        if self._on_message_callback:
+            standardized_message = {
+                "source": "mqtt",
+                "topic": msg.topic,
+                "payload": msg.payload,
+            }
+            self._on_message_callback(standardized_message)
+
+    def connect(self) -> bool:
         try:
-            self.client.on_message = self.on_message_callback
+            self.client.on_message = self._internal_on_message
             logger.info(
                 f"Attempting to connect to MQTT broker at {self.config['broker_host']}..."
             )
@@ -45,6 +56,7 @@ class MqttClientManager:
                 self.config["broker_port"],
                 self.config["keepalive"],
             )
+            self.client.loop_start()
             return True
         except (socket.gaierror, ConnectionRefusedError, TimeoutError) as e:
             logger.critical(
@@ -58,13 +70,16 @@ class MqttClientManager:
             )
             return False
 
-    def start_listening(self):
-        self.client.loop_forever()
+    def start(self, on_message_callback: MessageCallback):
+        if not callable(on_message_callback):
+            raise TypeError("on_message_callback must be a callable function")
+        logger.info("MQTT source is starting and setting up message callback.")
+        self._on_message_callback = on_message_callback
 
     def stop(self):
         try:
             self.client.loop_stop()
             self.client.disconnect()
-            logger.info("MQTT client closed.")
+            logger.info("MQTT source closed.")
         except Exception as e:
-            logger.warning(f"Exception during MQTT client disconnetion: {e}")
+            logger.warning(f"Exception during MQTT source disconnetion: {e}")
