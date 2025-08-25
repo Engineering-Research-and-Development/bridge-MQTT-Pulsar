@@ -5,6 +5,7 @@ from loguru import logger
 
 from .BridgeOrchestrator import BridgeOrchestrator
 from .sources.MqttSource import MqttSource
+from .sources.OpcUaSource import OpcUaSource
 from .pulsar.publisher import PulsarPublisher
 from .routing.router import DeviceTopicRouter
 
@@ -33,11 +34,21 @@ def main():
     logger.add(sys.stderr, level=log_level, colorize=True)
     logger.info(f"Logger level set to: {log_level}")
 
-    mqtt_source = MqttSource(config["mqtt"])
+    sources = []
+    if config.get("mqtt", {}).get("enabled", False):
+        sources.append(MqttSource(config["mqtt"]))
+
+    if config.get("opcua", {}).get("enabled", False):
+        sources.append(OpcUaSource(config["opcua"]))
+
+    if not sources:
+        logger.critical("No message sources are enabled in the configuration. Exiting.")
+        return
+
     topic_router = DeviceTopicRouter(config.get("routing", {}))
     publisher = PulsarPublisher(config["pulsar"], router=topic_router)
 
-    bridge = BridgeOrchestrator(sources=[mqtt_source], publisher=publisher)
+    bridge = BridgeOrchestrator(sources=sources, publisher=publisher)
     bridge.run()
 
 

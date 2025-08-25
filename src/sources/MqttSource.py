@@ -7,6 +7,10 @@ from .interfaces import IMessageSource, MessageCallback
 
 
 class MqttSource(IMessageSource):
+    """
+    Message source for collecting data from an MQTT broker by subscribing to topics.
+    """
+
     def __init__(self, config: dict):
         self.config = config
         self.client = mqtt.Client(

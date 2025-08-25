@@ -2,7 +2,15 @@
 logging:
   level: "INFO"
 
+opcua:
+  enabled: true
+  server_url: "opc.tcp://host.docker.internal:53530/OPCUA/SimulationServer" #test values
+  nodes_to_subscribe:
+    - "ns=3;i=1001"
+    - "ns=3;i=1002"
+
 mqtt:
+  enabled: true
   broker_host: "mosquitto"
   broker_port: 1883
   topic_subscribe: "test/data/#"

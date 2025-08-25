@@ -24,6 +24,7 @@ dependencies = [
     "loguru",
     "PyYAML",
     "tenacity",
+    "asyncua",
 ]
 
 [tool.setuptools.packages.find]
