@@ -2,6 +2,7 @@ import asyncio
 import threading
 from loguru import logger
 from asyncua import Client, Node, ua
+from asyncua.common.subscription import Subscription, DataChangeNotif
 from typing import Optional
 
 from .interfaces import IMessageSource, MessageCallback
@@ -18,6 +19,7 @@ class OpcUaSource(IMessageSource):
         self.nodes_to_subscribe = config.get("nodes_to_subscribe", [])
         self.client: Optional[Client] = None
         self._on_message_callback: Optional[MessageCallback] = None
+        self._subscription: Optional[Subscription] = None
 
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
@@ -101,7 +103,7 @@ class OpcUaSource(IMessageSource):
                 "An unhandled exception occurred in the OPC-UA async loop."
             )
         finally:
-            if self._loop.is_running():
+            if self._loop and self._loop.is_running():
                 self._loop.close()
             logger.info("OPC-UA async loop has been closed.")
 
@@ -139,12 +141,11 @@ class OpcUaSource(IMessageSource):
 
     async def _setup_subscription(self):
         try:
-            handler = self.SubscriptionHandler(self._on_message_callback)
-            subscription = await self.client.create_subscription(500, handler)
+            self._subscription = await self.client.create_subscription(500, self)
             nodes = [
                 self.client.get_node(node_id) for node_id in self.nodes_to_subscribe
             ]
-            await subscription.subscribe_data_change(nodes)
+            await self._subscription.subscribe_data_change(nodes)
             logger.success(
                 f"OPC-UA subscription successful for {len(nodes)} nodes. Listening for data changes..."
             )
@@ -157,24 +158,27 @@ class OpcUaSource(IMessageSource):
                 "An unexpected error occurred during OPC-UA subscription setup."
             )
 
-    class SubscriptionHandler:
-        """Internal class to mangage asyncua's data change callback."""
+    def datachange_notification(self, node: Node, val: any, data: DataChangeNotif):
+        """
+        Callback method to handle a single data change notification.
+        """
+        if not self._on_message_callback:
+            return
 
-        def __init__(self, on_message_callback: MessageCallback):
-            self._on_message_callback = on_message_callback
+        try:
+            data_value = data.monitored_item.Value
 
-        def datachange_notification(self, node: Node, val, data):
-            try:
-                node_id = node.nodeid.to_string()
-                logger.debug(f"OPC-UA DataChange: Node={node_id}, Value={val}")
+            standardized_message = {
+                "source": "opcua",
+                "topic": node.nodeid.to_string(),
+                "payload": str(val).encode("utf-8"),
+                "timestamp": data_value.ServerTimestamp,
+                "quality": data_value.StatusCode.name,
+            }
+            self._on_message_callback(standardized_message)
 
-                standardized_message = {
-                    "source": "opcua",
-                    "topic": node_id,  # NodeId as "topic" for the routing
-                    "payload": str(val).encode("utf-8"),
-                    "timestamp": data.ServerTimestamp,
-                    "quality": data.Value.StatusCode.name,
-                }
-                self._on_message_callback(standardized_message)
-            except Exception:
-                logger.exception("Error processing OPC-UA data change notification.")
+        except Exception:
+            node_id_str = node.nodeid.to_string() if node else "Unknown"
+            logger.exception(
+                f"Error processing OPC-UA data change notification for node {node_id_str}."
+            )
