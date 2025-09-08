@@ -131,7 +131,7 @@ class PulsarPublisher(Publisher):
             logger.warning(f"Received an invalid message format: {msg}")
             return
 
-        pulsar_topic = self.router.get_pulsar_topic(source_topic)
+        pulsar_topic = self.router.get_pulsar_topic(msg)
 
         if not pulsar_topic:
             return
