@@ -7,7 +7,9 @@ from .BridgeOrchestrator import BridgeOrchestrator
 from .sources.MqttSource import MqttSource
 from .sources.OpcUaSource import OpcUaSource
 from .pulsar.publisher import PulsarPublisher
-from .routing.router import DeviceTopicRouter
+from .routing.CentralRouter import CentralRouter
+from .routing.strategies.MqttTopicRouter import MqttTopicRouter
+from .routing.strategies.OpcUaTopicRouter import OpcUaTopicRouter
 
 
 def load_config(path: str = "config.yaml"):
@@ -34,19 +36,23 @@ def main():
     logger.add(sys.stderr, level=log_level, colorize=True)
     logger.info(f"Logger level set to: {log_level}")
 
+    routing_config = config.get("routing", {})
+    central_router = CentralRouter()
     sources = []
+    # TODO: discovery dinamica?
     if config.get("mqtt", {}).get("enabled", False):
         sources.append(MqttSource(config["mqtt"]))
+        central_router.register_strategy("mqtt", MqttTopicRouter(routing_config))
 
     if config.get("opcua", {}).get("enabled", False):
         sources.append(OpcUaSource(config["opcua"]))
+        central_router.register_strategy("opcua", OpcUaTopicRouter(routing_config))
 
     if not sources:
         logger.critical("No message sources are enabled in the configuration. Exiting.")
         return
 
-    topic_router = DeviceTopicRouter(config.get("routing", {}))
-    publisher = PulsarPublisher(config["pulsar"], router=topic_router)
+    publisher = PulsarPublisher(config["pulsar"], router=central_router)
 
     bridge = BridgeOrchestrator(sources=sources, publisher=publisher)
     bridge.run()
