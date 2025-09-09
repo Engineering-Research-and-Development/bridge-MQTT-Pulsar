@@ -1,16 +1,14 @@
 import pulsar
 from loguru import logger
 from tenacity import Retrying, stop_after_attempt, wait_exponential, RetryError
-from .interfaces import Publisher
-from ..routing.interfaces import TopicRouter
+from .interfaces import IDestination
 
 
-class PulsarPublisher(Publisher):
-    def __init__(self, config: dict, router: TopicRouter):
+class PulsarDestination(IDestination):
+    def __init__(self, config: dict):
         self.config = config
         self.client: pulsar.Client | None = None
         self.producers: dict[str, pulsar.Producer] = {}
-        self.router = router
 
         publishing_config = self.config.get("publishing", {})
         self.retrier = Retrying(
@@ -123,31 +121,29 @@ class PulsarPublisher(Publisher):
                 f"CRITICAL: Failed to send message from topic '{msg.get('topic')}' to DLQ '{self.dlq_topic}'. DATA LOSS OCCURRED."
             )
 
-    def publish(self, msg: dict):
-        source_topic = msg.get("topic")
-        payload = msg.get("payload")
+    def publish(self, message: dict):
+        destination_topic = message.get("destination_topic")
+        payload = message.get("payload")
+        source_topic = message.get("topic")
 
-        if not source_topic or payload is None:
-            logger.warning(f"Received an invalid message format: {msg}")
+        if not destination_topic or payload is None:
+            logger.warning(
+                f"Message is missing 'destination_topic' or 'payload'. Cannot publish. Message: {message}"
+            )
             return
 
-        pulsar_topic = self.router.get_pulsar_topic(msg)
-
-        if not pulsar_topic:
-            return
-
-        producer = self._get_producer(pulsar_topic)
+        producer = self._get_producer(destination_topic)
 
         if not producer:
             logger.error(
-                f"Could not get a producer for topic '{pulsar_topic}'. Forwarding to Dead Letter Queue."
+                f"Could not get a producer for topic '{destination_topic}'. Forwarding to Dead Letter Queue."
             )
-            self._send_to_dlq(msg)
+            self._send_to_dlq(message)
             return
 
         try:
             logger.info(
-                f"Forwarding message from '{msg.get('source')}' topic '{source_topic}' to Pulsar topic '{pulsar_topic}'"
+                f"Forwarding message from '{message.get('source')}' topic '{source_topic}' to Pulsar topic '{destination_topic}'"
             )
             self.retrier(self._send_message, producer, payload)
         except RetryError as e:
@@ -155,7 +151,7 @@ class PulsarPublisher(Publisher):
                 f"Message from topic '{source_topic}' could not be delivered to Pulsar after all attempts. "
                 f"Final error: {e}. Forwarding to Dead Letter Queue."
             )
-            self._send_to_dlq(msg)
+            self._send_to_dlq(message)
         except Exception:
             logger.exception(
                 f"An unexpected, non-retryable error occurred during message publishing for topic '{source_topic}'"

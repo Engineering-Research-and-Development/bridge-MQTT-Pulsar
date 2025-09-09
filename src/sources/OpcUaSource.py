@@ -5,10 +5,10 @@ from asyncua import Client, Node, ua
 from asyncua.common.subscription import Subscription, DataChangeNotif
 from typing import Optional
 
-from .interfaces import IMessageSource, MessageCallback
+from .interfaces import ISource, MessageCallback
 
 
-class OpcUaSource(IMessageSource):
+class OpcUaSource(ISource):
     """
     Message source for collecting data from an OPC UA server by subscribing to node changes.
     """
@@ -175,7 +175,7 @@ class OpcUaSource(IMessageSource):
                 "timestamp": data_value.ServerTimestamp,
                 "quality": data_value.StatusCode.name,
             }
-            self._on_message_callback(standardized_message)
+            self._on_message_callback(self, standardized_message)
 
         except Exception:
             node_id_str = node.nodeid.to_string() if node else "Unknown"

@@ -3,13 +3,10 @@ import os
 import yaml
 from loguru import logger
 
-from .BridgeOrchestrator import BridgeOrchestrator
-from .sources.MqttSource import MqttSource
-from .sources.OpcUaSource import OpcUaSource
-from .pulsar.publisher import PulsarPublisher
-from .routing.CentralRouter import CentralRouter
-from .routing.strategies.MqttTopicRouter import MqttTopicRouter
-from .routing.strategies.OpcUaTopicRouter import OpcUaTopicRouter
+from .orchestrator import Orchestrator
+from .sources.mqttsource import MqttSource
+from .sources.opcuasource import OpcUaSource
+from .destinations.pulsar import PulsarDestination
 
 
 def load_config(path: str = "config.yaml"):
@@ -36,25 +33,34 @@ def main():
     logger.add(sys.stderr, level=log_level, colorize=True)
     logger.info(f"Logger level set to: {log_level}")
 
-    routing_config = config.get("routing", {})
-    central_router = CentralRouter()
-    sources = []
-    # TODO: discovery dinamica?
-    if config.get("mqtt", {}).get("enabled", False):
-        sources.append(MqttSource(config["mqtt"]))
-        central_router.register_strategy("mqtt", MqttTopicRouter(routing_config))
+    pipelines = {}
 
-    if config.get("opcua", {}).get("enabled", False):
-        sources.append(OpcUaSource(config["opcua"]))
-        central_router.register_strategy("opcua", OpcUaTopicRouter(routing_config))
+    pulsar_dest = PulsarDestination(config["pulsar"])
 
-    if not sources:
-        logger.critical("No message sources are enabled in the configuration. Exiting.")
+    if not pulsar_dest.connect():
+        logger.critical("Critical Pulsar initialization error. Exiting.")
         return
 
-    publisher = PulsarPublisher(config["pulsar"], router=central_router)
+    # TODO: discovery dinamica da config?
+    sources = {}
+    if config.get("mqtt", {}).get("enabled", False):
+        sources["mqtt"] = MqttSource(config["mqtt"])
+    if config.get("opcua", {}).get("enabled", False):
+        sources["opcua"] = OpcUaSource(config["opcua"])
 
-    bridge = BridgeOrchestrator(sources=sources, publisher=publisher)
+    if "mqtt" in sources:
+        pipelines[sources["mqtt"]] = pulsar_dest
+        logger.info("Pipeline configured: MQTT -> Pulsar")
+
+    if "opcua" in sources:
+        pipelines[sources["opcua"]] = pulsar_dest
+        logger.info("Pipeline configured: OPC UA -> Pulsar")
+
+    if not pipelines:
+        logger.critical("No pipelines configured or sources enabled. Exiting.")
+        return
+
+    bridge = Orchestrator(pipelines)
     bridge.run()
 
 

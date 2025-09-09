@@ -3,10 +3,10 @@ import threading
 import paho.mqtt.client as mqtt
 from loguru import logger
 
-from .interfaces import IMessageSource, MessageCallback
+from .interfaces import ISource, MessageCallback
 
 
-class MqttSource(IMessageSource):
+class MqttSource(ISource):
     """
     Message source for collecting data from an MQTT broker by subscribing to topics.
     """
@@ -47,7 +47,7 @@ class MqttSource(IMessageSource):
                 "topic": msg.topic,
                 "payload": msg.payload,
             }
-            self._on_message_callback(standardized_message)
+            self._on_message_callback(self, standardized_message)
 
     def connect(self) -> bool:
         try:
