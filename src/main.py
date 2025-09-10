@@ -7,6 +7,8 @@ from .orchestrator import Orchestrator
 from .sources.mqttsource import MqttSource
 from .sources.opcuasource import OpcUaSource
 from .destinations.pulsar import PulsarDestination
+from .sources.interfaces import ISource
+from .destinations.interfaces import IDestination
 
 
 def load_config(path: str = "config.yaml"):
@@ -33,34 +35,46 @@ def main():
     logger.add(sys.stderr, level=log_level, colorize=True)
     logger.info(f"Logger level set to: {log_level}")
 
-    pipelines = {}
+    components: dict[str, ISource | IDestination | None] = {
+        "mqtt": MqttSource(config["mqtt"])
+        if config.get("mqtt", {}).get("enabled")
+        else None,
+        "opcua": OpcUaSource(config["opcua"])
+        if config.get("opcua", {}).get("enabled")
+        else None,
+        "pulsar": PulsarDestination(config["pulsar"])
+        if config.get("pulsar", {}).get("enabled")
+        else None,
+    }
 
-    pulsar_dest = PulsarDestination(config["pulsar"])
+    pipelines_map = {}
+    pipeline_configs = config.get("pipelines", [])
 
-    if not pulsar_dest.connect():
-        logger.critical("Critical Pulsar initialization error. Exiting.")
+    if not pipeline_configs:
+        logger.warning("No pipelines are defined in the configuration. Exiting.")
         return
 
-    # TODO: discovery dinamica da config?
-    sources = {}
-    if config.get("mqtt", {}).get("enabled", False):
-        sources["mqtt"] = MqttSource(config["mqtt"])
-    if config.get("opcua", {}).get("enabled", False):
-        sources["opcua"] = OpcUaSource(config["opcua"])
+    for p_config in pipeline_configs:
+        source_name = p_config.get("source")
+        dest_name = p_config.get("destination")
 
-    if "mqtt" in sources:
-        pipelines[sources["mqtt"]] = pulsar_dest
-        logger.info("Pipeline configured: MQTT -> Pulsar")
+        source_instance = components.get(source_name)
+        dest_instance = components.get(dest_name)
 
-    if "opcua" in sources:
-        pipelines[sources["opcua"]] = pulsar_dest
-        logger.info("Pipeline configured: OPC UA -> Pulsar")
+        if source_instance and dest_instance:
+            pipelines_map[source_instance] = dest_instance
+            logger.success(f"Pipeline configured: {source_name} -> {dest_name}")
+        else:
+            logger.error(
+                f"Skipping pipeline '{p_config.get('name', 'unnamed')}': "
+                f"Source '{source_name}' or Destination '{dest_name}' is not enabled in the config."
+            )
 
-    if not pipelines:
-        logger.critical("No pipelines configured or sources enabled. Exiting.")
+    if not pipelines_map:
+        logger.critical("No valid pipelines could be constructed. Exiting.")
         return
 
-    bridge = Orchestrator(pipelines)
+    bridge = Orchestrator(pipelines_map)
     bridge.run()
 
 

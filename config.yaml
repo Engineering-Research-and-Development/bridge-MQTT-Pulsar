@@ -24,8 +24,13 @@ pulsar:
     retry_attempts: 5
     dlq_topic: "persistent://public/default/pulsar-bridge-dlq"
 
-routing:
-  pulsar_tenant: "public"
-  pulsar_namespace: "default"
-  match_prefix: "test/data"
-  device_index: 2
+pipelines:
+  - name: "mqtt_to_pulsar"
+    # The source name must match the configuration key (es. 'mqtt')
+    source: "mqtt"
+    # Same for the destination name (es. 'pulsar')
+    destination: "pulsar"
+    
+  - name: "opcua_to_pulsar"
+    source: "opcua"
+    destination: "pulsar"
