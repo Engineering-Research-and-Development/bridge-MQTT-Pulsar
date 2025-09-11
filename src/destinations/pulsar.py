@@ -1,6 +1,7 @@
 import pulsar
 from loguru import logger
 from tenacity import Retrying, stop_after_attempt, wait_exponential, RetryError
+from ..core.message import Message
 from .interfaces import IDestination
 
 
@@ -121,17 +122,7 @@ class PulsarDestination(IDestination):
                 f"CRITICAL: Failed to send message from topic '{msg.get('topic')}' to DLQ '{self.dlq_topic}'. DATA LOSS OCCURRED."
             )
 
-    def publish(self, message: dict):
-        destination_topic = message.get("destination_topic")
-        payload = message.get("payload")
-        source_topic = message.get("topic")
-
-        if not destination_topic or payload is None:
-            logger.warning(
-                f"Message is missing 'destination_topic' or 'payload'. Cannot publish. Message: {message}"
-            )
-            return
-
+    def publish(self, message: Message, destination_topic: str):
         producer = self._get_producer(destination_topic)
 
         if not producer:
@@ -143,18 +134,18 @@ class PulsarDestination(IDestination):
 
         try:
             logger.info(
-                f"Forwarding message from '{message.get('source')}' topic '{source_topic}' to Pulsar topic '{destination_topic}'"
+                f"Forwarding message from '{message.source_id}' topic '{message.topic}' to Pulsar topic '{destination_topic}'"
             )
-            self.retrier(self._send_message, producer, payload)
+            self.retrier(self._send_message, producer, message.payload)
         except RetryError as e:
             logger.critical(
-                f"Message from topic '{source_topic}' could not be delivered to Pulsar after all attempts. "
+                f"Message from topic '{message.topic}' could not be delivered to Pulsar after all attempts. "
                 f"Final error: {e}. Forwarding to Dead Letter Queue."
             )
             self._send_to_dlq(message)
         except Exception:
             logger.exception(
-                f"An unexpected, non-retryable error occurred during message publishing for topic '{source_topic}'"
+                f"An unexpected, non-retryable error occurred during message publishing for topic '{message.topic}'"
             )
 
     def stop(self):

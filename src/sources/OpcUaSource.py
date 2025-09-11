@@ -5,6 +5,7 @@ from asyncua import Client, Node, ua
 from asyncua.common.subscription import Subscription, DataChangeNotif
 from typing import Optional
 
+from ..core.message import Message
 from .interfaces import ISource, MessageCallback
 
 
@@ -168,13 +169,13 @@ class OpcUaSource(ISource):
         try:
             data_value = data.monitored_item.Value
 
-            standardized_message = {
-                "source": "opcua",
-                "topic": node.nodeid.to_string(),
-                "payload": str(val).encode("utf-8"),
-                "timestamp": data_value.ServerTimestamp,
-                "quality": data_value.StatusCode.name,
-            }
+            standardized_message = Message(
+                source_id="opcua",
+                topic=node.nodeid.to_string(),
+                payload=str(val).encode("utf-8"),
+                timestamp=data_value.ServerTimestamp,
+                metadata={"quality": data_value.StatusCode.name},
+            )
             self._on_message_callback(self, standardized_message)
 
         except Exception:

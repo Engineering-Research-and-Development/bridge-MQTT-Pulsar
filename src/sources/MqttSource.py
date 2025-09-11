@@ -3,6 +3,7 @@ import threading
 import paho.mqtt.client as mqtt
 from loguru import logger
 
+from ..core.message import Message
 from .interfaces import ISource, MessageCallback
 
 
@@ -42,11 +43,11 @@ class MqttSource(ISource):
     def _internal_on_message(self, client, userdata, msg):
         """Internal callback that works as an adapter and translator between Source and Publisher."""
         if self._on_message_callback:
-            standardized_message = {
-                "source": "mqtt",
-                "topic": msg.topic,
-                "payload": msg.payload,
-            }
+            standardized_message = Message(
+                source_id="mqtt",
+                topic=msg.topic,
+                payload=msg.payload,
+            )
             self._on_message_callback(self, standardized_message)
 
     def connect(self) -> bool:

@@ -56,7 +56,7 @@ class Orchestrator:
         This method prepares the message and calls the destination's publish method.
         """
         try:
-            # TODO: improve routing logic
+            # TODO: encapsulate routing logic
             source_topic = message.get("topic")
             # source_type = message.get("source")
 

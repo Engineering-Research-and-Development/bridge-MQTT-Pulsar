@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import Callable
+from ..core.message import Message
 
-MessageCallback = Callable[["ISource", dict], None]
+MessageCallback = Callable[["ISource", Message], None]
 
 
 class IConnectable(ABC):
