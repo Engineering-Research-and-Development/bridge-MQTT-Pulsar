@@ -1,8 +1,10 @@
 import threading
+import re
 from loguru import logger
 from concurrent.futures import ThreadPoolExecutor
 from .destinations.interfaces import IDestination
 from .sources.interfaces import ISource
+from .core.message import Message
 
 
 class Orchestrator:
@@ -10,10 +12,11 @@ class Orchestrator:
         self._pipelines = pipelines
         self._sources = list(pipelines.keys())
         self._destinations = list(set(pipelines.values()))
-
         self._shutdown_event = threading.Event()
 
         self._executor = ThreadPoolExecutor(max_workers=10)
+
+        self._invalid_chars_re = re.compile(r"[^a-zA-Z0-9_-]")
 
     def run(self):
         logger.info("Starting the Bridge...")
@@ -37,7 +40,7 @@ class Orchestrator:
         finally:
             self.stop()
 
-    def _handle_message(self, source: ISource, message: dict):
+    def _handle_message(self, source: ISource, message: Message):
         """
         Receives a message from a source and dispatches it to the correct destination.
         The forwarding logic is submitted to a thread pool to avoid blocking the source.
@@ -51,26 +54,18 @@ class Orchestrator:
 
         self._executor.submit(self._forward_message, destination, message)
 
-    def _forward_message(self, destination: IDestination, message: dict):
+    def _forward_message(self, destination: IDestination, message: Message):
         """
         This method prepares the message and calls the destination's publish method.
         """
         try:
             # TODO: encapsulate routing logic
-            source_topic = message.get("topic")
-            # source_type = message.get("source")
-
-            device_name = "".join(
-                c if c.isalnum() or c in "-_" else "-" for c in source_topic
-            )
+            normalized_topic = self._invalid_chars_re.sub("-", message.topic)
 
             # eg: persistent://public/default/test-data
-            destination_topic = f"persistent://public/default/{device_name}"
+            destination_topic = f"persistent://public/default/{normalized_topic}"
 
-            message_to_publish = message.copy()
-            message_to_publish["destination_topic"] = destination_topic
-
-            destination.publish(message_to_publish)
+            destination.publish(message, destination_topic)
         except Exception:
             logger.exception(
                 f"An unhandled error occurred in a forwarding worker thread for destination {destination.__class__.__name__}."
@@ -79,7 +74,9 @@ class Orchestrator:
     def stop(self):
         logger.info("Shutting down the bridge...")
 
-        logger.debug("Shutting down the forwarding thread pool...")
+        logger.debug(
+            "Shutting down the forwarding thread pool (waiting for tasks to complete)..."
+        )
         self._executor.shutdown(wait=True)
 
         for component in self._sources + self._destinations:

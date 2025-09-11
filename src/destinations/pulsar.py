@@ -99,37 +99,36 @@ class PulsarDestination(IDestination):
             )
             raise
 
-    def _send_to_dlq(self, msg: dict):
+    def _send_to_dlq(self, message: Message, reason: str):
         if not self.dlq_producer:
             logger.error(
-                f"DLQ producer is not available. Message from topic '{msg.get('source')}' will be lost."
+                f"DLQ producer is not available. Message from topic '{message.source_name}' will be lost."
             )
             return
 
         try:
             properties = {
-                "original_source": msg.get("source"),
-                "original_topic": msg.get("topic", "N/A"),
-                "failure_reason": "Max retries exceeded or producer creation failed",
+                "original_source": message.source_name,
+                "original_topic": message.topic,
+                "failure_reason": reason,
+                "timestamp_utc": message.timestamp_utc.isoformat(),
             }
-            payload = msg.get("payload", b"")
-            self.dlq_producer.send(payload, properties=properties)
+            self.dlq_producer.send(message.payload, properties=properties)
             logger.warning(
-                f"Message from topic '{msg.get('topic')}' successfully sent to DLQ '{self.dlq_topic}'."
+                f"Message from topic '{message.topic}' successfully sent to DLQ '{self.dlq_topic}'. Reason: {reason}"
             )
         except Exception:
             logger.critical(
-                f"CRITICAL: Failed to send message from topic '{msg.get('topic')}' to DLQ '{self.dlq_topic}'. DATA LOSS OCCURRED."
+                f"CRITICAL: Failed to send message from topic '{message.topic}' to DLQ '{self.dlq_topic}'. DATA LOSS OCCURRED."
             )
 
     def publish(self, message: Message, destination_topic: str):
         producer = self._get_producer(destination_topic)
 
         if not producer:
-            logger.error(
-                f"Could not get a producer for topic '{destination_topic}'. Forwarding to Dead Letter Queue."
-            )
-            self._send_to_dlq(message)
+            reason = f"Could not get a producer for topic '{destination_topic}'"
+            logger.error(reason)
+            self._send_to_dlq(message, reason)
             return
 
         try:
@@ -138,15 +137,13 @@ class PulsarDestination(IDestination):
             )
             self.retrier(self._send_message, producer, message.payload)
         except RetryError as e:
-            logger.critical(
-                f"Message from topic '{message.topic}' could not be delivered to Pulsar after all attempts. "
-                f"Final error: {e}. Forwarding to Dead Letter Queue."
-            )
-            self._send_to_dlq(message)
+            reason = f"Max retries exceeded for topic '{destination_topic}'. Final error: {e}"
+            logger.critical(reason)
+            self._send_to_dlq(message, reason)
         except Exception:
-            logger.exception(
-                f"An unexpected, non-retryable error occurred during message publishing for topic '{message.topic}'"
-            )
+            reason = f"An unexpected, non-retryable error occurred during message publishing for topic '{message.topic}'"
+            logger.exception(reason)
+            self._send_to_dlq(message, reason)
 
     def stop(self):
         logger.info("Closing all Pulsar producers...")
