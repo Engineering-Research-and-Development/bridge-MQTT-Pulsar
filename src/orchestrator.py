@@ -54,16 +54,16 @@ class Orchestrator:
 
         self._executor.submit(self._forward_message, destination, message)
 
-    def _forward_message(self, destination: IDestination, message: Message):
-        """
-        This method prepares the message and calls the destination's publish method.
-        """
-        try:
-            # TODO: encapsulate routing logic
-            normalized_topic = self._invalid_chars_re.sub("-", message.topic)
+    def _determine_destination_topic(self, message: Message):
+        """Returns the corrected destination topic"""
+        normalized_topic = self._invalid_chars_re.sub("-", message.topic)
+        # eg: persistent://public/default/test-data
+        return f"persistent://public/default/{normalized_topic}"
 
-            # eg: persistent://public/default/test-data
-            destination_topic = f"persistent://public/default/{normalized_topic}"
+    def _forward_message(self, destination: IDestination, message: Message):
+        """Calls the destination's publish method."""
+        try:
+            destination_topic = self._determine_destination_topic(message)
 
             destination.publish(message, destination_topic)
         except Exception:
