@@ -34,3 +34,6 @@ pipelines:
   - name: "opcua_to_pulsar"
     source: "opcua"
     destination: "pulsar"
+
+heartbeat:
+  interval_seconds: 30
