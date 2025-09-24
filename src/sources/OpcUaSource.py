@@ -6,10 +6,11 @@ from asyncua.common.subscription import Subscription, DataChangeNotif
 from typing import Optional
 
 from ..core.message import Message
+from ..core.heartbeat import HeartbeatMixin
 from .interfaces import ISource, MessageCallback
 
 
-class OpcUaSource(ISource):
+class OpcUaSource(ISource, HeartbeatMixin):
     """
     Message source for collecting data from an OPC UA server by subscribing to node changes.
     """
@@ -28,6 +29,10 @@ class OpcUaSource(ISource):
         self._stop_event = threading.Event()
         self._connection_status = threading.Event()
 
+        self.heartbeat_interval = config.get("heartbeat", {}).get(
+            "interval_seconds", 30
+        )
+
     def connect(self) -> bool:
         """
         Starts the async connection process in a separated thread and waits for the result.
@@ -35,25 +40,32 @@ class OpcUaSource(ISource):
         """
         if not self.nodes_to_subscribe:
             logger.warning(
-                "OPC-UA service is enabled, but no nodes are configured for subscription. Service will not start."
+                "OPC-UA: No nodes configured for subscription. Source will not start."
             )
             return False
 
         if self._thread is not None:
-            logger.warning("OPC-UA connect called more than once. Ignoring.")
+            logger.warning("OPC-UA: Connect called more than once. Ignoring.")
             return self._connection_status.is_set()
 
-        logger.info("Starting OPC-UA service thread...")
+        logger.info(f"OPC-UA: Starting async worker thread for {self.server_url}...")
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._run_worker, daemon=True)
         self._thread.start()
 
-        if not self._connection_status.wait(timeout=10):
-            logger.critical(f"OPC-UA: Connection to {self.server_url} timed out.")
+        connected = self._connection_status.wait(timeout=10)
+
+        if not connected:
+            logger.critical(
+                f"OPC-UA: Connection to {self.server_url} timed out or failed."
+            )
             self.stop()
             return False
 
         logger.success(f"OPC-UA: Successfully connected to {self.server_url}.")
+
+        self._start_heartbeat(self.heartbeat_interval)
+
         return True
 
     def start(self, on_message_callback: MessageCallback):
@@ -67,6 +79,7 @@ class OpcUaSource(ISource):
         self._on_message_callback = on_message_callback
 
     def stop(self):
+        self._stop_heartbeat()
         if not self._thread:
             return
         logger.info("OPC-UA: Stopping source...")
@@ -182,3 +195,27 @@ class OpcUaSource(ISource):
             logger.exception(
                 f"Error processing OPC-UA data change notification for node {node_id_str}."
             )
+
+    # --- Heartbeat ---
+
+    @property
+    def _is_healthy(self) -> bool:
+        if not self.client or not self._loop or not self._loop.is_running():
+            return False
+        try:
+            health_check_node = self.client.get_node("i=2256")
+
+            future = asyncio.run_coroutine_threadsafe(
+                health_check_node.read_value(), self._loop
+            )
+
+            future.result(timeout=5)
+            return True
+        except Exception:
+            return False
+
+    def _perform_reconnect(self) -> bool:
+        logger.info("OPC-UA: Heartbeat failed, attempting to perform reconnection...")
+        self.stop()
+        threading.sleep(1)
+        return self.connect()

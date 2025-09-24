@@ -3,11 +3,12 @@ import threading
 import paho.mqtt.client as mqtt
 from loguru import logger
 
-from ..core.message import Message
 from .interfaces import ISource, MessageCallback
+from ..core.message import Message
+from ..core.heartbeat import HeartbeatMixin
 
 
-class MqttSource(ISource):
+class MqttSource(ISource, HeartbeatMixin):
     """
     Message source for collecting data from an MQTT broker by subscribing to topics.
     """
@@ -21,6 +22,11 @@ class MqttSource(ISource):
         self.client.on_disconnect = self._on_disconnect
         self._on_message_callback: MessageCallback | None = None
         self._thread: threading.Thread | None = None
+
+        self.heartbeat_interval = config.get("heartbeat", {}).get(
+            "interval_seconds", 30
+        )
+        self._stop_event = threading.Event()
 
     def _on_connect(self, client, userdata, flags, reason_code, properties):
         if reason_code == 0:
@@ -62,6 +68,12 @@ class MqttSource(ISource):
                 self.config["keepalive"],
             )
             self.client.loop_start()
+
+            threading.Timer(
+                2.0, lambda: self._start_heartbeat(self.heartbeat_interval)
+            ).start()
+            self._stop_event.clear()
+
             return True
         except (socket.gaierror, ConnectionRefusedError, TimeoutError) as e:
             logger.critical(
@@ -82,9 +94,24 @@ class MqttSource(ISource):
         self._on_message_callback = on_message_callback
 
     def stop(self):
+        self._stop_event.set()
+        self._stop_heartbeat()
         try:
             self.client.loop_stop()
             self.client.disconnect()
-            logger.info("MQTT source closed.")
+            logger.info("MQTT: Stopped.")
         except Exception as e:
             logger.warning(f"Exception during MQTT source disconnetion: {e}")
+
+    @property
+    def _is_healthy(self) -> bool:
+        return self.client.is_connected()
+
+    def _perform_reconnect(self) -> bool:
+        logger.info("MQTT: Heartbeat failed, attempting to perform reconnection...")
+        try:
+            self.client.reconnect()
+            return self.client.is_connected()
+        except Exception:
+            # If paho's reconnect() fails we raise an exception to handle it to tenacity
+            raise ConnectionError("MQTT reconnect attempt failed")

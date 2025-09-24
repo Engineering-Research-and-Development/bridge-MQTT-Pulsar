@@ -1,11 +1,17 @@
 import pulsar
+import threading
 from loguru import logger
 from tenacity import Retrying, stop_after_attempt, wait_exponential, RetryError
 from ..core.message import Message
+from ..core.heartbeat import HeartbeatMixin
 from .interfaces import IDestination
 
 
-class PulsarDestination(IDestination):
+class PulsarDestination(IDestination, HeartbeatMixin):
+    """
+    Defines the Apache Pulsar cluster destination to which the messages will be published.
+    """
+
     def __init__(self, config: dict):
         self.config = config
         self.client: pulsar.Client | None = None
@@ -19,6 +25,11 @@ class PulsarDestination(IDestination):
         self.dlq_topic = publishing_config.get("dlq_topic")
         self.dlq_producer: pulsar.Producer | None = None
 
+        self.heartbeat_interval = config.get("heartbeat", {}).get(
+            "interval_seconds", 30
+        )
+        self._stop_event = threading.Event()
+
     def connect(self) -> bool:
         try:
             self.client = pulsar.Client(self.config["service_url"])
@@ -29,13 +40,17 @@ class PulsarDestination(IDestination):
 
             if self.dlq_topic:
                 self.dlq_producer = self.client.create_producer(self.dlq_topic)
-                logger.info(
+                logger.debug(
                     f"Successfully created DLQ producer for topic: {self.dlq_topic}"
                 )
 
             logger.success(
                 f"Successfully connected to Pulsar service at {self.config['service_url']}"
             )
+
+            self._stop_event.clear()
+            self._start_heartbeat(self.heartbeat_interval)
+
             return True
         except (pulsar.ConnectError, pulsar.Timeout) as e:
             logger.critical(
@@ -148,6 +163,8 @@ class PulsarDestination(IDestination):
     def stop(self):
         logger.info("Closing all Pulsar producers...")
         logger.debug(f"Closing {len(self.producers)} Pulsar producers.")
+        self._stop_event.set()
+        self._stop_heartbeat()
         for topic, producer in self.producers.items():
             try:
                 producer.close()
@@ -163,6 +180,27 @@ class PulsarDestination(IDestination):
         if self.client:
             try:
                 self.client.close()
-                logger.info("Pulsar client closed.")
+                logger.info("Pulsar: Stopped.")
             except Exception as e:
                 logger.warning(f"Exception during Pulsar client closing: {e}")
+
+    @property
+    def _is_healthy(self) -> bool:
+        if not self.client or self.client.is_closed():
+            return False
+        try:
+            self.client.get_topic_partitions(
+                "persistent://public/default/health-check-heartbeat"
+            )
+            return True
+        except Exception:
+            return False
+
+    def _perform_reconnect(self) -> bool:
+        logger.info("Pulsar: Heartbeat failed, attempting to perform reconnection...")
+        if self.client:
+            try:
+                self.client.close()
+            except Exception:
+                pass
+        return self.connect()
