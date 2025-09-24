@@ -18,6 +18,7 @@ mqtt:
   keepalive: 60
  
 pulsar:
+  enabled: true
   service_url: "pulsar://broker:6650"
   
   publishing:

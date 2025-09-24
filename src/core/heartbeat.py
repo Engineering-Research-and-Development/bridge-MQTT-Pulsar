@@ -48,7 +48,7 @@ class HeartbeatMixin(ABC):
         """The core logic executed by the timer."""
         component_name = self.__class__.__name__
 
-        if self._is_healthy():
+        if self._is_healthy:
             logger.debug(f"Heartbeat check PASSED for {component_name}.")
         else:
             logger.warning(

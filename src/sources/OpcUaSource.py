@@ -200,7 +200,13 @@ class OpcUaSource(ISource, HeartbeatMixin):
 
     @property
     def _is_healthy(self) -> bool:
-        if not self.client or not self._loop or not self._loop.is_running():
+        if (
+            not self.client
+            or not self._loop
+            or not self._loop.is_running()
+            or not self._thread
+            or not self._thread.is_alive()
+        ):
             return False
         try:
             health_check_node = self.client.get_node("i=2256")

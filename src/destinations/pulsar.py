@@ -186,7 +186,7 @@ class PulsarDestination(IDestination, HeartbeatMixin):
 
     @property
     def _is_healthy(self) -> bool:
-        if not self.client or self.client.is_closed():
+        if not self.client:
             return False
         try:
             self.client.get_topic_partitions(
