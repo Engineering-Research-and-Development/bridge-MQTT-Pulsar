@@ -7,8 +7,6 @@ from .orchestrator import Orchestrator
 from .sources.mqttsource import MqttSource
 from .sources.opcuasource import OpcUaSource
 from .destinations.pulsar import PulsarDestination
-from .sources.interfaces import ISource
-from .destinations.interfaces import IDestination
 
 
 def load_config(path: str = "config.yaml"):
@@ -35,46 +33,57 @@ def main():
     logger.add(sys.stderr, level=log_level, colorize=True)
     logger.info(f"Logger level set to: {log_level}")
 
-    components: dict[str, ISource | IDestination | None] = {
-        "mqtt": MqttSource(config["mqtt"])
-        if config.get("mqtt", {}).get("enabled")
-        else None,
-        "opcua": OpcUaSource(config["opcua"])
-        if config.get("opcua", {}).get("enabled")
-        else None,
-        "pulsar": PulsarDestination(config["pulsar"])
-        if config.get("pulsar", {}).get("enabled")
-        else None,
-    }
+    source_factories = {"mqtt": MqttSource, "opcua": OpcUaSource}
+    dest_factories = {"pulsar": PulsarDestination}
 
-    pipelines_map = {}
+    sources = {}
+    for name, source_config in config.get("sources", {}).items():
+        if source_config.get("enabled"):
+            if name in source_factories:
+                source_config["id"] = name
+                sources[name] = source_factories[name](source_config)
+                logger.debug(f"Source '{name}' created.")
+            else:
+                logger.warning(f"Unknown source type '{name}' in config.")
+
+    destinations = {}
+    for name, dest_config in config.get("destinations", {}).items():
+        if dest_config.get("enabled"):
+            if name in dest_factories:
+                destinations[name] = dest_factories[name](dest_config)
+                logger.debug(f"Destination '{name}' created.")
+            else:
+                logger.warning(f"Unknown destination type '{name}' in config.")
+
+    pipelines = {}
     pipeline_configs = config.get("pipelines", [])
-
     if not pipeline_configs:
         logger.warning("No pipelines are defined in the configuration. Exiting.")
         return
 
     for p_config in pipeline_configs:
-        source_name = p_config.get("source")
-        dest_name = p_config.get("destination")
+        source_id = p_config.get("source")
+        dest_id = p_config.get("destination")
 
-        source_instance = components.get(source_name)
-        dest_instance = components.get(dest_name)
+        source_instance = sources.get(source_id)
+        dest_instance = destinations.get(dest_id)
 
         if source_instance and dest_instance:
-            pipelines_map[source_instance] = dest_instance
-            logger.success(f"Pipeline configured: {source_name} -> {dest_name}")
+            pipelines[source_id] = dest_instance
+            logger.success(f"Pipeline configured: {source_id} -> {dest_id}")
         else:
             logger.error(
                 f"Skipping pipeline '{p_config.get('name', 'unnamed')}': "
-                f"Source '{source_name}' or Destination '{dest_name}' is not enabled in the config."
+                f"Source '{source_id}' or Destination '{dest_id}' is not configured or enabled."
             )
 
-    if not pipelines_map:
+    if not pipelines:
         logger.critical("No valid pipelines could be constructed. Exiting.")
         return
 
-    bridge = Orchestrator(pipelines_map)
+    unique_destinations = list(set(pipelines.values()))
+
+    bridge = Orchestrator(sources, pipelines, unique_destinations)
     bridge.run()
 
 
