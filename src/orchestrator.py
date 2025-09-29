@@ -1,85 +1,126 @@
-import threading
 import re
+import queue
+from multiprocessing import Process, Queue
+from multiprocessing.synchronize import Event
 from loguru import logger
-from concurrent.futures import ThreadPoolExecutor
+
 from .destinations.interfaces import IDestination
 from .sources.interfaces import ISource
 from .core.message import Message
 
 
-class Orchestrator:
-    def __init__(self, pipelines: dict[ISource, IDestination]):
-        self._pipelines = pipelines
-        self._sources = list(pipelines.keys())
-        self._destinations = list(set(pipelines.values()))
-        self._shutdown_event = threading.Event()
+def _source_process_worker(source: ISource, message_queue: Queue, stop_event: Event):
+    """
+    Entry point for each source process.
+    It calls the source's run method and handles graceful shutdown.
+    """
+    try:
+        source.run(message_queue, stop_event)  # TODO
+    except KeyboardInterrupt:
+        logger.debug(f"Process for {source.__class__.__name__} received interrupt.")
+    except Exception:
+        logger.exception(
+            f"Unhandled exception in process for {source.__class__.__name__}"
+        )
+    return
 
-        self._executor = ThreadPoolExecutor(max_workers=10)
+
+class Orchestrator:
+    def __init__(
+        self,
+        sources: dict[str, ISource],
+        pipelines: dict[str, IDestination],
+        destinations: list[IDestination],
+    ):
+        self._sources = sources
+        self._pipelines = pipelines
+        self._destinations = destinations
+
+        self._message_queue = Queue()
+        self._stop_event = Event()
+        self._processes: list[Process] = []
 
         self._invalid_chars_re = re.compile(r"[^a-zA-Z0-9_-]")
 
     def run(self):
         logger.info("Starting the Bridge...")
 
-        for component in self._destinations + self._sources:
-            if not component.connect():
+        for dest in self._destinations:
+            if not dest.connect():
                 logger.critical(
-                    f"Critical error connecting {component.__class__.__name__}. Exiting."
+                    f"Critical error connecting {dest.__class__.__name__}. Exiting."
                 )
                 return
 
-        for source in self._sources:
-            source.start(self._handle_message)
+        for source_id, source_instance in self._sources.items():
+            if source_id not in self._pipelines:
+                logger.warning(
+                    f"Source '{source_id}' has no pipeline configured. Skipping."
+                )
+                continue
 
-        logger.success("Bridge is running.")
+            process = Process(
+                target=_source_process_worker,
+                args=(source_instance, self._message_queue, self._stop_event),
+            )
+            self._processes.append(process)
+            process.start()
+            logger.info(f"Started process for source: {source_id}")
+
+        logger.success("Bridge is running. All source processes started.")
 
         try:
-            self._shutdown_event.wait()
+            self._message_loop()
         except KeyboardInterrupt:
             logger.info("Keyboard interruption detected. Shutting down...")
         finally:
             self.stop()
 
-    def _handle_message(self, source: ISource, message: Message):
-        """
-        Receives a message from a source and dispatches it to the correct destination.
-        The forwarding logic is submitted to a thread pool to avoid blocking the source.
-        """
-        destination = self._pipelines.get(source)
-        if not destination:
-            logger.error(
-                f"Configuration error: No destination found for source {source.__class__.__name__}. Message dropped."
-            )
-            return
+    def _message_loop(self):
+        """Continuously fetches messages from the queue and forwards them."""
+        while not self._stop_event.is_set():
+            try:
+                message: Message = self._message_queue.get()
+                self._forward_message(message)
+            except queue.Empty:
+                continue
+            except Exception:
+                logger.exception("An error occurred in the main message loop.")
 
-        self._executor.submit(self._forward_message, destination, message)
-
-    def _determine_destination_topic(self, message: Message):
-        """Returns the corrected destination topic"""
-        normalized_topic = self._invalid_chars_re.sub("-", message.topic)
-        # eg: persistent://public/default/test-data
-        return f"persistent://public/default/{normalized_topic}"
-
-    def _forward_message(self, destination: IDestination, message: Message):
-        """Calls the destination's publish method."""
+    def _forward_message(self, message: Message):
+        """Forwards a single message to its configured destination."""
+        destination = self._pipelines.get(message.source_id)
         try:
             destination_topic = self._determine_destination_topic(message)
-
+            logger.info(
+                f"Forwarding message from '{message.source_id}' to Pulsar topic '{destination_topic}'"
+            )
             destination.publish(message, destination_topic)
         except Exception:
             logger.exception(
-                f"An unhandled error occurred in a forwarding worker thread for destination {destination.__class__.__name__}."
+                f"An unhandled error occurred while forwarding a message to {destination.__class__.__name__}."
             )
+
+    def _determine_destination_topic(self, message: Message):
+        """Returns the corrected destination topic"""
+        # eg: persistent://public/default/test-data
+        normalized_topic = self._invalid_chars_re.sub("-", message.topic)
+        return f"persistent://public/default/{normalized_topic}"
 
     def stop(self):
         logger.info("Shutting down the bridge...")
+        self._stop_event.set()
 
-        logger.debug(
-            "Shutting down the forwarding thread pool (waiting for tasks to complete)..."
-        )
-        self._executor.shutdown(wait=True)
+        for process in self._processes:
+            if process.is_alive():
+                logger.debug(f"Terminating process {process.pid}...")
+                process.terminate()
+                process.join(timeout=5)
 
-        for component in self._sources + self._destinations:
-            component.stop()
+        for dest in self._destinations:
+            dest.stop()
+
+        self._message_queue.close()
+        self._message_queue.join_thread()
 
         logger.success("Bridge shut down successfully.")
