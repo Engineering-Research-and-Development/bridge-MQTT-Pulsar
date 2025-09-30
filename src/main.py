@@ -5,8 +5,8 @@ import argparse
 from loguru import logger
 
 from .orchestrator import Orchestrator
-from .sources.MqttSource import MqttSource
-from .sources.OpcUaSource import OpcUaSource
+from .sources.mqttsource import MqttSource
+from .sources.opcuasource import OpcUaSource
 from .destinations.pulsar import PulsarDestination
 
 
