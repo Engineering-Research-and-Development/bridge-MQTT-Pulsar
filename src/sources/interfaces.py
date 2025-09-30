@@ -1,38 +1,13 @@
-from abc import ABC, abstractmethod
-from typing import Callable
-from ..core.message import Message
-
-MessageCallback = Callable[["ISource", Message], None]
+from abc import ABC
+from ..core.process import IProcess
 
 
-class IConnectable(ABC):
-    """Defines a contract for components that have a connect/stop lifecycle."""
-
-    @abstractmethod
-    def connect(self) -> bool:
-        """Establishes the connection to the endpoint."""
-        raise NotImplementedError
-
-    @abstractmethod
-    def stop(self) -> None:
-        """Stops the component and cleans up resources."""
-        raise NotImplementedError
-
-
-class ISource(IConnectable):
+# solo per definizione di cos'è una source o butto tutto qua dentro e bona?
+class ISource(IProcess, ABC):
     """
     Defines the contract for any message source (e.g., MQTT, OPC UA)
-    that the bridge can connect to.
+    that the bridge can connect to. Each source wil be run in
+    its own independent process.
     """
 
-    @abstractmethod
-    def start(self, on_message_callback: MessageCallback) -> None:
-        """
-        Starts the process of listening for data.
-
-        Args:
-            on_message_callback: A function to be called when a new message
-                                 is received. The source is responsible for
-                                 invoking this callback with standardized data.
-        """
-        raise NotImplementedError
+    pass
