@@ -1,15 +1,33 @@
 import sys
 import os
 import yaml
+import argparse
 from loguru import logger
 
 from .orchestrator import Orchestrator
-from .sources.mqttsource import MqttSource
-from .sources.opcuasource import OpcUaSource
+from .sources.MqttSource import MqttSource
+from .sources.OpcUaSource import OpcUaSource
 from .destinations.pulsar import PulsarDestination
 
 
-def load_config(path: str = "config.yaml"):
+def create_parser():
+    parser = argparse.ArgumentParser(
+        description="Bridge-MQTT-Pulsar",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="./config.yaml",
+        metavar="FILE",
+        help="YAML config file",
+    )
+
+    return parser
+
+
+def load_config(path: str):
     config_path = os.path.join(os.getcwd(), path)
 
     try:
@@ -26,7 +44,9 @@ def load_config(path: str = "config.yaml"):
 
 
 def main():
-    config = load_config("config.yaml")
+    parser = create_parser()
+    args = parser.parse_args()
+    config = load_config(args.config)
 
     log_level = config.get("logging", {}).get("level", "INFO").upper()
     logger.remove()
