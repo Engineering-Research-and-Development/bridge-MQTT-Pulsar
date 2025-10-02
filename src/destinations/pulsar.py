@@ -147,9 +147,6 @@ class PulsarDestination(IDestination, HeartbeatMixin):
             return
 
         try:
-            logger.info(
-                f"Forwarding message from '{message.source_id}' topic '{message.topic}' to Pulsar topic '{destination_topic}'"
-            )
             self.retrier(self._send_message, producer, message.payload)
         except RetryError as e:
             reason = f"Max retries exceeded for topic '{destination_topic}'. Final error: {e}"

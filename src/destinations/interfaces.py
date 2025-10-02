@@ -1,9 +1,8 @@
 from abc import abstractmethod
-from ..sources.interfaces import IConnectable
 from ..core.message import Message
 
 
-class IDestination(IConnectable):
+class IDestination:
     """Defines a contract for any message destination (Pulsar, Kafka...)."""
 
     @abstractmethod

@@ -5,7 +5,7 @@ logging:
 sources:
   opcua:
     enabled: true
-    server_url: "opc.tcp://host.docker.internal:53530/OPCUA/SimulationServer" #test values
+    server_url: "opc.tcp://host.docker.internal:4840/OPCUA/SimulationServer" #test values
     nodes_to_subscribe:
       - "ns=3;i=1001"
       - "ns=3;i=1002"

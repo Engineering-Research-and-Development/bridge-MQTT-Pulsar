@@ -1,7 +1,8 @@
 import re
 import queue
-from multiprocessing import Process, Queue
-from multiprocessing.synchronize import Event
+import multiprocessing as mp
+from multiprocessing import Queue
+from multiprocessing.synchronize import Event as Event
 from loguru import logger
 
 from .destinations.interfaces import IDestination
@@ -9,13 +10,13 @@ from .sources.interfaces import ISource
 from .core.message import Message
 
 
-def _source_process_worker(source: ISource, message_queue: Queue, stop_event: Event):
+def source_process_worker(source: ISource, message_queue: mp.Queue, stop_event: Event):
     """
     Entry point for each source process.
     It calls the source's run method and handles graceful shutdown.
     """
     try:
-        source.run(message_queue, stop_event)  # TODO
+        source.run(message_queue, stop_event)
     except KeyboardInterrupt:
         logger.debug(f"Process for {source.__class__.__name__} received interrupt.")
     except Exception:
@@ -36,9 +37,9 @@ class Orchestrator:
         self._pipelines = pipelines
         self._destinations = destinations
 
-        self._message_queue = Queue()
-        self._stop_event = Event()
-        self._processes: list[Process] = []
+        self._message_queue: Queue = mp.Queue()
+        self._stop_event: Event = mp.Event()
+        self._processes: list[mp.Process] = []
 
         self._invalid_chars_re = re.compile(r"[^a-zA-Z0-9_-]")
 
@@ -59,8 +60,8 @@ class Orchestrator:
                 )
                 continue
 
-            process = Process(
-                target=_source_process_worker,
+            process = mp.Process(
+                target=source_process_worker,
                 args=(source_instance, self._message_queue, self._stop_event),
             )
             self._processes.append(process)
