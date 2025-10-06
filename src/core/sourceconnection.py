@@ -1,14 +1,12 @@
 import asyncio
 import socket
-from abc import ABC, abstractmethod
-from typing import Any, Callable
-
+import threading
 import paho.mqtt.client as mqtt
+
+from abc import ABC, abstractmethod
 from asyncua import Client, ua
 from loguru import logger
 from multiprocessing.synchronize import Event
-
-RawMessageCallback = Callable[..., Any]
 
 
 class ISourceConnection(ABC):
@@ -19,7 +17,7 @@ class ISourceConnection(ABC):
     """
 
     @abstractmethod
-    def connect(self, on_message_callback: RawMessageCallback) -> bool:
+    def connect(self) -> bool:
         """
         Establishes the connection to the endpoint.
         """
@@ -41,10 +39,11 @@ class MqttSourceConnection(ISourceConnection):
         )
         self.client.on_connect = self._on_connect
         self.client.on_disconnect = self._on_disconnect
+        self.heartbeat_interval = config.get("heartbeat", {}).get("interval_seconds")
+        self._stop_event = threading.Event()
 
-    def connect(self, on_message_callback: RawMessageCallback) -> bool:
+    def connect(self) -> mqtt.Client | None:
         try:
-            self.client.on_message = on_message_callback
             logger.info(f"Attempting to connect to {self.config['broker_host']}...")
             self.client.connect(
                 self.config["broker_host"],
@@ -52,18 +51,24 @@ class MqttSourceConnection(ISourceConnection):
                 self.config["keepalive"],
             )
             self.client.loop_start()
-            return True
+
+            threading.Timer(
+                2.0, lambda: self._start_heartbeat(self.heartbeat_interval)
+            ).start()
+            self._stop_event.clear()
+
+            return self.client
         except (socket.gaierror, ConnectionRefusedError, TimeoutError) as e:
             logger.critical(
                 f"MQTT connection failed: Could not reach broker at {self.config['broker_host']}:{self.config['broker_port']}. "
                 f"Error: {e}. Check configuration or broker status."
             )
-            return False
+            return None
         except Exception:
             logger.exception(
                 "An unexpected, non-connection error occurred during MQTT setup"
             )
-            return False
+            return None
 
     def disconnect(self) -> None:
         logger.info("Disconnecting from MQTT broker...")
