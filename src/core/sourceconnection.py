@@ -1,0 +1,176 @@
+import asyncio
+import socket
+from abc import ABC, abstractmethod
+from typing import Any, Callable
+
+import paho.mqtt.client as mqtt
+from asyncua import Client, ua
+from loguru import logger
+from multiprocessing.synchronize import Event
+
+RawMessageCallback = Callable[..., Any]
+
+
+class ISourceConnection(ABC):
+    """
+    Manages the connection lifecycle of a data source.
+    Its responsibility is to connect to an external service, handle raw data,
+    and pass it to a callback provided by its source class.
+    """
+
+    @abstractmethod
+    def connect(self, on_message_callback: RawMessageCallback) -> bool:
+        """
+        Establishes the connection to the endpoint.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def disconnect(self) -> None:
+        """Stops the component and cleans up resources."""
+        raise NotImplementedError
+
+
+class MqttSourceConnection(ISourceConnection):
+    """Handles the connection logic for an MQTT broker."""
+
+    def __init__(self, config: dict):
+        self.config = config
+        self.client = mqtt.Client(
+            mqtt.CallbackAPIVersion.VERSION2, client_id=self.config["client_id"]
+        )
+        self.client.on_connect = self._on_connect
+        self.client.on_disconnect = self._on_disconnect
+
+    def connect(self, on_message_callback: RawMessageCallback) -> bool:
+        try:
+            self.client.on_message = on_message_callback
+            logger.info(f"Attempting to connect to {self.config['broker_host']}...")
+            self.client.connect(
+                self.config["broker_host"],
+                self.config["broker_port"],
+                self.config["keepalive"],
+            )
+            self.client.loop_start()
+            return True
+        except (socket.gaierror, ConnectionRefusedError, TimeoutError) as e:
+            logger.critical(
+                f"MQTT connection failed: Could not reach broker at {self.config['broker_host']}:{self.config['broker_port']}. "
+                f"Error: {e}. Check configuration or broker status."
+            )
+            return False
+        except Exception:
+            logger.exception(
+                "An unexpected, non-connection error occurred during MQTT setup"
+            )
+            return False
+
+    def disconnect(self) -> None:
+        logger.info("Disconnecting from MQTT broker...")
+        try:
+            self.client.loop_stop()
+            self.client.disconnect()
+        except Exception as e:
+            logger.warning(f"Exception during MQTT broker disconnection: {e}")
+
+    def _on_connect(self, client, userdata, flags, reason_code, properties):
+        if reason_code == 0:
+            logger.success(
+                f"Connected to MQTT broker: {self.config['broker_host']}:{self.config['broker_port']}"
+            )
+            client.subscribe(self.config["topic_subscribe"])
+            logger.info(f"Subscribed to topic: {self.config['topic_subscribe']}")
+        else:
+            logger.warning(
+                f"MQTT connection failed with code: {reason_code}. The client will try again automatically."
+            )
+
+    def _on_disconnect(self, client, userdata, flags, reason_code, properties):
+        if reason_code == 0:
+            logger.info("MQTT client disconnected successfully.")
+        else:
+            logger.warning(f"Unexpected MQTT disconnection. Reason code: {reason_code}")
+
+    @property
+    def _is_healthy(self) -> bool:
+        return self.client.is_connected()
+
+    def _perform_reconnect(self) -> bool:
+        logger.info("MQTT: Heartbeat failed, attempting to perform reconnection...")
+        try:
+            self.client.reconnect()
+            return self.client.is_connected()
+        except Exception:
+            # If paho's reconnect() fails we raise an exception to handle it to tenacity
+            raise ConnectionError("MQTT reconnect attempt failed")
+
+
+class OpcuaSourceConnection:
+    """Handles the async connection and subscription logic for an OPC UA server."""
+
+    def __init__(self, config: dict):
+        self.server_url = config["server_url"]
+        self.nodes_to_subscribe = config.get("nodes_to_subscribe", [])
+        self.publishing_interval = config.get("publishing_interval_ms", 500)
+
+    async def connect_and_run(self, data_change_handler: object, stop_event: Event):
+        """
+        The main async method that orchestrates the client's lifecycle.
+        It connects, creates a subscription, and keeps running until stopped.
+        """
+        client = Client(url=self.server_url)
+        try:
+            async with client:
+                logger.success(f"OPC-UA: Successfully connected to {self.server_url}.")
+                subscription = await client.create_subscription(
+                    self.publishing_interval, data_change_handler
+                )
+                nodes = [
+                    client.get_node(node_id) for node_id in self.nodes_to_subscribe
+                ]
+                await subscription.subscribe_data_change(nodes)
+                logger.success(
+                    f"OPC-UA: Subscription successful for {len(nodes)} nodes."
+                )
+
+                logger.info("OPC-UA: Listening for data changes...")
+                while not stop_event.is_set():
+                    await asyncio.sleep(1)
+
+        except (OSError, asyncio.TimeoutError) as e:
+            logger.critical(f"OPC-UA: Failed to connect to server. Error: {e}")
+        except ua.UaError as e:
+            logger.error(
+                f"OPC-UA: Failed to subscribe to nodes. Error: {e}. Check Node IDs."
+            )
+        except Exception:
+            logger.exception("OPC-UA: A critical error occurred in the client task.")
+        finally:
+            logger.warning("OPC-UA: Client is disconnecting.")
+
+    @property
+    def _is_healthy(self) -> bool:
+        if (
+            not self.client
+            or not self._loop
+            or not self._loop.is_running()
+            or not self._thread
+            or not self._thread.is_alive()
+        ):
+            return False
+        try:
+            health_check_node = self.client.get_node("i=2256")
+
+            future = asyncio.run_coroutine_threadsafe(
+                health_check_node.read_value(), self._loop
+            )
+
+            future.result(timeout=5)
+            return True
+        except Exception:
+            return False
+
+    def _perform_reconnect(self) -> bool:
+        logger.info("OPC-UA: Heartbeat failed, attempting to perform reconnection...")
+        self.stop()
+        return self.connect()
