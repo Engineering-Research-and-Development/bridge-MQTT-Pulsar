@@ -4,11 +4,10 @@ from loguru import logger
 
 from .interfaces import ISource
 from ..core.message import Message
-from ..core.heartbeat import HeartbeatMixin
 from ..core.sourceconnection import MqttSourceConnection
 
 
-class MqttSource(ISource, HeartbeatMixin):
+class MqttSource(ISource):
     """
     Message source for collecting data from an MQTT broker by subscribing to topics.
     """

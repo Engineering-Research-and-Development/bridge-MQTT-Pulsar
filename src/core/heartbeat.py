@@ -2,6 +2,7 @@ import threading
 from abc import ABC, abstractmethod
 from loguru import logger
 from tenacity import Retrying, stop_after_attempt, wait_exponential
+import paho.mqtt.client as mqtt
 
 
 class HeartbeatMixin(ABC):
@@ -13,7 +14,10 @@ class HeartbeatMixin(ABC):
     - perform_reconnect(): The logic to attempt a reconnection.
     """
 
-    _heartbeat_timer: threading.Timer | None = None
+    heartbeat_timer: threading.Timer | None = None
+
+    def __init__(self, heartbeat_timer: threading.Timer):
+        self.heartbeat_timer = heartbeat_timer
 
     @property
     @abstractmethod
@@ -74,3 +78,19 @@ class HeartbeatMixin(ABC):
 
         # Schedules next check
         self._start_heartbeat(interval_seconds)
+
+
+class MqttHeartBeat(HeartbeatMixin):
+    def __init__(self, heartbeat_timer: threading.Timer, mqtt_client: mqtt.Client):
+        super().__init__(heartbeat_timer)
+        self.client = mqtt_client
+
+    def _is_healthy(self) -> bool:
+        return self.client.is_connected()
+
+    def _perform_reconnect(self) -> bool:
+        error_code = self.client.reconnect()
+        if error_code is not None:
+            logger.critical("error")
+            return False
+        return True

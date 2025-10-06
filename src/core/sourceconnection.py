@@ -16,6 +16,9 @@ class ISourceConnection(ABC):
     and pass it to a callback provided by its source class.
     """
 
+    def __init__(self, config: dict):
+        self.config = config
+
     @abstractmethod
     def connect(self) -> bool:
         """
@@ -33,13 +36,13 @@ class MqttSourceConnection(ISourceConnection):
     """Handles the connection logic for an MQTT broker."""
 
     def __init__(self, config: dict):
-        self.config = config
+        super().__init__(config)
         self.client = mqtt.Client(
             mqtt.CallbackAPIVersion.VERSION2, client_id=self.config["client_id"]
         )
-        self.client.on_connect = self._on_connect
-        self.client.on_disconnect = self._on_disconnect
+        self.connect()
         self.heartbeat_interval = config.get("heartbeat", {}).get("interval_seconds")
+        self.heartbeat = None
         self._stop_event = threading.Event()
 
     def connect(self) -> mqtt.Client | None:
@@ -50,9 +53,10 @@ class MqttSourceConnection(ISourceConnection):
                 self.config["broker_port"],
                 self.config["keepalive"],
             )
+            self.client.subscribe(self.config["topic_subscribe"])
             self.client.loop_start()
 
-            threading.Timer(
+            self.heartbeat = threading.Timer(
                 2.0, lambda: self._start_heartbeat(self.heartbeat_interval)
             ).start()
             self._stop_event.clear()
@@ -75,26 +79,9 @@ class MqttSourceConnection(ISourceConnection):
         try:
             self.client.loop_stop()
             self.client.disconnect()
+            self.client.on_disconnect()
         except Exception as e:
             logger.warning(f"Exception during MQTT broker disconnection: {e}")
-
-    def _on_connect(self, client, userdata, flags, reason_code, properties):
-        if reason_code == 0:
-            logger.success(
-                f"Connected to MQTT broker: {self.config['broker_host']}:{self.config['broker_port']}"
-            )
-            client.subscribe(self.config["topic_subscribe"])
-            logger.info(f"Subscribed to topic: {self.config['topic_subscribe']}")
-        else:
-            logger.warning(
-                f"MQTT connection failed with code: {reason_code}. The client will try again automatically."
-            )
-
-    def _on_disconnect(self, client, userdata, flags, reason_code, properties):
-        if reason_code == 0:
-            logger.info("MQTT client disconnected successfully.")
-        else:
-            logger.warning(f"Unexpected MQTT disconnection. Reason code: {reason_code}")
 
     @property
     def _is_healthy(self) -> bool:
