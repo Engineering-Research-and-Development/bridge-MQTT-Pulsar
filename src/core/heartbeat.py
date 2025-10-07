@@ -5,19 +5,16 @@ from tenacity import Retrying, stop_after_attempt, wait_exponential
 import paho.mqtt.client as mqtt
 
 
-class HeartbeatMixin(ABC):
+class Heartbeat(ABC):
     """
     Provides heartbeat functionality for each individual module.
-
-    A component using this mixin must implement:
-    - is_healthy(): A check to determine if the component is connected.
-    - perform_reconnect(): The logic to attempt a reconnection.
+    This class manages the timer and retry logic, while subclasses
+    must provide the specific health check and reconnection logic.
     """
 
-    heartbeat_timer: threading.Timer | None = None
-
-    def __init__(self, heartbeat_timer: threading.Timer):
-        self.heartbeat_timer = heartbeat_timer
+    def __init__(self):
+        self._heartbeat_timer: threading.Timer | None = None
+        self._stop_event = threading.Event()
 
     @property
     @abstractmethod
@@ -30,23 +27,32 @@ class HeartbeatMixin(ABC):
         """Must contain the logic to reconnect."""
         raise NotImplementedError
 
-    def _start_heartbeat(self, interval_seconds: int):
+    def start(self, interval_seconds: int):
         """Starts the heartbeat timer."""
+        logger.debug(
+            f"Starting heartbeat for {self.__class__.__name__} with {interval_seconds}s interval."
+        )
+        self._stop_event.clear()
+        self._schedule_next_check(interval_seconds)
+
+    def stop(self):
+        """Stops the heartbeat timer."""
+        logger.debug(f"Stopping heartbeat for {self.__class__.__name__}.")
+        self._stop_event.set()
+        if self._heartbeat_timer:
+            self._heartbeat_timer.cancel()
+            self._heartbeat_timer = None
+
+    def _schedule_next_check(self, interval_seconds: int):
+        """Schedules the next execution of the heartbeat check."""
         if self._stop_event.is_set():
             return
 
-        # Schedules next healthcheck
         self._heartbeat_timer = threading.Timer(
             interval_seconds, self._run_heartbeat_check, [interval_seconds]
         )
         self._heartbeat_timer.daemon = True
         self._heartbeat_timer.start()
-
-    def _stop_heartbeat(self):
-        """Stops the heartbeat timer."""
-        if self._heartbeat_timer:
-            self._heartbeat_timer.cancel()
-            self._heartbeat_timer = None
 
     def _run_heartbeat_check(self, interval_seconds: int):
         """The core logic executed by the timer."""
@@ -76,13 +82,13 @@ class HeartbeatMixin(ABC):
                     f"The component remains disconnected."
                 )
 
-        # Schedules next check
-        self._start_heartbeat(interval_seconds)
+        # Schedules next check if not stopped
+        self._schedule_next_check(interval_seconds)
 
 
-class MqttHeartBeat(HeartbeatMixin):
-    def __init__(self, heartbeat_timer: threading.Timer, mqtt_client: mqtt.Client):
-        super().__init__(heartbeat_timer)
+class MqttHeartbeat(Heartbeat):
+    def __init__(self, mqtt_client: mqtt.Client):
+        super().__init__()
         self.client = mqtt_client
 
     def _is_healthy(self) -> bool:
@@ -90,7 +96,9 @@ class MqttHeartBeat(HeartbeatMixin):
 
     def _perform_reconnect(self) -> bool:
         error_code = self.client.reconnect()
-        if error_code is not None:
-            logger.critical("error")
-            return False
+        if error_code != 0:
+            logger.error(f"MQTT reconnect failed with code: {error_code}")
+            raise ConnectionError(
+                f"MQTT reconnect attempt failed with code {error_code}"
+            )
         return True

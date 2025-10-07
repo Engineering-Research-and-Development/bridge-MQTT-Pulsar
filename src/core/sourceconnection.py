@@ -1,29 +1,25 @@
 import asyncio
 import socket
-import threading
 import paho.mqtt.client as mqtt
 
 from abc import ABC, abstractmethod
 from asyncua import Client, ua
 from loguru import logger
 from multiprocessing.synchronize import Event
+from .heartbeat import MqttHeartbeat
 
 
 class ISourceConnection(ABC):
     """
     Manages the connection lifecycle of a data source.
-    Its responsibility is to connect to an external service, handle raw data,
-    and pass it to a callback provided by its source class.
     """
 
     def __init__(self, config: dict):
         self.config = config
 
     @abstractmethod
-    def connect(self) -> bool:
-        """
-        Establishes the connection to the endpoint.
-        """
+    def connect(self) -> mqtt.Client | None:
+        """Establishes the connection to the endpoint."""
         raise NotImplementedError
 
     @abstractmethod
@@ -40,10 +36,10 @@ class MqttSourceConnection(ISourceConnection):
         self.client = mqtt.Client(
             mqtt.CallbackAPIVersion.VERSION2, client_id=self.config["client_id"]
         )
-        self.connect()
-        self.heartbeat_interval = config.get("heartbeat", {}).get("interval_seconds")
-        self.heartbeat = None
-        self._stop_event = threading.Event()
+        self.heartbeat = MqttHeartbeat(self.client)
+        self.heartbeat_interval = self.config.get("heartbeat", {}).get(
+            "interval_seconds", 30
+        )
 
     def connect(self) -> mqtt.Client | None:
         try:
@@ -56,10 +52,8 @@ class MqttSourceConnection(ISourceConnection):
             self.client.subscribe(self.config["topic_subscribe"])
             self.client.loop_start()
 
-            self.heartbeat = threading.Timer(
-                2.0, lambda: self._start_heartbeat(self.heartbeat_interval)
-            ).start()
-            self._stop_event.clear()
+            logger.success("MQTT: Successfully connected!")
+            self.heartbeat.start(self.heartbeat_interval)
 
             return self.client
         except (socket.gaierror, ConnectionRefusedError, TimeoutError) as e:
@@ -75,26 +69,13 @@ class MqttSourceConnection(ISourceConnection):
             return None
 
     def disconnect(self) -> None:
-        logger.info("Disconnecting from MQTT broker...")
+        logger.info("MQTT: Disconnecting from broker...")
+        self.heartbeat.stop()
         try:
             self.client.loop_stop()
             self.client.disconnect()
-            self.client.on_disconnect()
         except Exception as e:
-            logger.warning(f"Exception during MQTT broker disconnection: {e}")
-
-    @property
-    def _is_healthy(self) -> bool:
-        return self.client.is_connected()
-
-    def _perform_reconnect(self) -> bool:
-        logger.info("MQTT: Heartbeat failed, attempting to perform reconnection...")
-        try:
-            self.client.reconnect()
-            return self.client.is_connected()
-        except Exception:
-            # If paho's reconnect() fails we raise an exception to handle it to tenacity
-            raise ConnectionError("MQTT reconnect attempt failed")
+            logger.warning(f"MQTT: Exception during disconnection: {e}")
 
 
 class OpcuaSourceConnection:
