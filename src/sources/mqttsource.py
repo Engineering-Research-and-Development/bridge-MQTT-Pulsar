@@ -27,7 +27,7 @@ class MqttSource(ISource):
             logger.critical("MQTT source could not connect. Process will exit.")
             return
 
-        self.client.on_message = self._internal_on_message
+        client.on_message = self._internal_on_message
 
         logger.info("MQTT source is running.")
         stop_event.wait()
@@ -37,7 +37,7 @@ class MqttSource(ISource):
 
     def _internal_on_message(self, client, userdata, msg):
         """Internal callback that works as an adapter and translator between Source and Publisher."""
-        if self._on_message_callback:
+        if self._message_queue:
             standardized_message = Message(
                 source_id=self.config["id"],
                 topic=msg.topic,
