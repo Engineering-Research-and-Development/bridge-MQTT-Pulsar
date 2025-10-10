@@ -1,3 +1,4 @@
+import time
 from multiprocessing import Queue
 from multiprocessing.synchronize import Event
 from loguru import logger
@@ -21,18 +22,26 @@ class MqttSource(ISource):
         """Main process loop for the MQTT source."""
         self._message_queue = message_queue
 
-        client = self._connector.connect()
+        while not stop_event.is_set():
+            client = self._connector.connect()
 
-        if not client:
-            logger.critical("MQTT source could not connect. Process will exit.")
-            return
+            if not client:
+                logger.warning("MQTT connection failed. Retrying in 5 seconds...")
+                time.sleep(5)
+                continue
 
-        client.on_message = self._internal_on_message
+            client.on_message = self._internal_on_message
+            logger.info("MQTT source is connected and running.")
 
-        logger.info("MQTT source is running.")
-        stop_event.wait()
+            while not stop_event.is_set():
+                if not client.is_connected():
+                    logger.warning("MQTT connection lost. Attempting to reconnect...")
+                    break
+                time.sleep(1)
 
-        self._connector.disconnect()
+            # if here then it means that the connection was lost or stop signal received
+            self._connector.disconnect()
+
         logger.info("MQTT source has stopped.")
 
     def _internal_on_message(self, client, userdata, msg):
