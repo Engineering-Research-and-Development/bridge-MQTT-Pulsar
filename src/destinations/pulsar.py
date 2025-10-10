@@ -3,11 +3,11 @@ import threading
 from loguru import logger
 from tenacity import Retrying, stop_after_attempt, wait_exponential, RetryError
 from ..core.message import Message
-from ..core.heartbeat import HeartbeatMixin
+from ..core.heartbeat import Heartbeat
 from .interfaces import IDestination
 
 
-class PulsarDestination(IDestination, HeartbeatMixin):
+class PulsarDestination(IDestination, Heartbeat):
     """
     Defines the Apache Pulsar cluster destination to which the messages will be published.
     """
@@ -49,7 +49,7 @@ class PulsarDestination(IDestination, HeartbeatMixin):
             )
 
             self._stop_event.clear()
-            self._start_heartbeat(self.heartbeat_interval)
+            self.start(self.heartbeat_interval)
 
             return True
         except (pulsar.ConnectError, pulsar.Timeout) as e:
@@ -161,7 +161,7 @@ class PulsarDestination(IDestination, HeartbeatMixin):
         logger.info("Closing all Pulsar producers...")
         logger.debug(f"Closing {len(self.producers)} Pulsar producers.")
         self._stop_event.set()
-        self._stop_heartbeat()
+        self.stop()
         for topic, producer in self.producers.items():
             try:
                 producer.close()

@@ -2,7 +2,7 @@ import re
 import queue
 import multiprocessing as mp
 from multiprocessing import Queue
-from multiprocessing.synchronize import Event as Event
+from multiprocessing.synchronize import Event
 from loguru import logger
 
 from .destinations.interfaces import IDestination

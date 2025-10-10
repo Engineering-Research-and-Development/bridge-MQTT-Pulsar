@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from asyncua import Client, ua
 from loguru import logger
 from multiprocessing.synchronize import Event
-from .heartbeat import MqttHeartbeat
+from .heartbeat import MqttHeartbeat, OpcuaHeartbeat
 
 
 class ISourceConnection(ABC):
@@ -79,22 +79,39 @@ class MqttSourceConnection(ISourceConnection):
 
 
 class OpcuaSourceConnection:
-    """Handles the async connection and subscription logic for an OPC UA server."""
+    """Handles the async connection, subscription and health logic for an OPC UA server."""
 
     def __init__(self, config: dict):
+        self.config = config
         self.server_url = config["server_url"]
         self.nodes_to_subscribe = config.get("nodes_to_subscribe", [])
         self.publishing_interval = config.get("publishing_interval_ms", 500)
+        self.heartbeat_interval = self.config.get("heartbeat", {}).get(
+            "interval_seconds", 30
+        )
 
-    async def connect_and_run(self, data_change_handler: object, stop_event: Event):
+    async def connect_and_run(
+        self,
+        data_change_handler: object,
+        stop_event: Event,
+        external_shutdown_event: asyncio.Event,
+    ):
         """
         The main async method that orchestrates the client's lifecycle.
         It connects, creates a subscription, and keeps running until stopped.
         """
+        heartbeat: OpcuaHeartbeat | None = None
+        heartbeat_shutdown_event = asyncio.Event()
         client = Client(url=self.server_url)
+
         try:
             async with client:
                 logger.success(f"OPC-UA: Successfully connected to {self.server_url}.")
+
+                loop = asyncio.get_running_loop()
+                heartbeat = OpcuaHeartbeat(client, loop, heartbeat_shutdown_event)
+                heartbeat.start(self.heartbeat_interval)
+
                 subscription = await client.create_subscription(
                     self.publishing_interval, data_change_handler
                 )
@@ -107,43 +124,33 @@ class OpcuaSourceConnection:
                 )
 
                 logger.info("OPC-UA: Listening for data changes...")
-                while not stop_event.is_set():
+                while (
+                    not stop_event.is_set()
+                    and not heartbeat_shutdown_event.is_set()
+                    and not external_shutdown_event.is_set()
+                ):
                     await asyncio.sleep(1)
 
-        except (OSError, asyncio.TimeoutError) as e:
-            logger.critical(f"OPC-UA: Failed to connect to server. Error: {e}")
+                if heartbeat_shutdown_event.is_set():
+                    logger.warning("OPC-UA: Shutdown triggered by heartbeat failure.")
+                    raise ConnectionError("Connection lost due to heartbeat failure.")
+
+                if external_shutdown_event.is_set():
+                    logger.warning(
+                        "OPC-UA: Shutdown triggered by subscription status failure."
+                    )
+                    raise ConnectionError("Subscription became invalid.")
+
+        except (OSError, asyncio.TimeoutError, ConnectionError) as e:
+            logger.critical(f"OPC-UA: Connection failed or lost. Error: {e}")
+            raise ConnectionError(f"OPC-UA connection failed: {e}") from e
         except ua.UaError as e:
-            logger.error(
-                f"OPC-UA: Failed to subscribe to nodes. Error: {e}. Check Node IDs."
-            )
-        except Exception:
-            logger.exception("OPC-UA: A critical error occurred in the client task.")
+            logger.error(f"OPC-UA: Subscription failed. Error: {e}. Check Node IDs.")
+            raise ConnectionError(f"OPC-UA subscription failed: {e}") from e
+        except Exception as e:
+            logger.exception("OPC-UA: A critical error occurred.")
+            raise ConnectionError(f"An unexpected OPC-UA error occurred: {e}") from e
         finally:
+            if heartbeat:
+                heartbeat.stop()
             logger.warning("OPC-UA: Client is disconnecting.")
-
-    @property
-    def _is_healthy(self) -> bool:
-        if (
-            not self.client
-            or not self._loop
-            or not self._loop.is_running()
-            or not self._thread
-            or not self._thread.is_alive()
-        ):
-            return False
-        try:
-            health_check_node = self.client.get_node("i=2256")
-
-            future = asyncio.run_coroutine_threadsafe(
-                health_check_node.read_value(), self._loop
-            )
-
-            future.result(timeout=5)
-            return True
-        except Exception:
-            return False
-
-    def _perform_reconnect(self) -> bool:
-        logger.info("OPC-UA: Heartbeat failed, attempting to perform reconnection...")
-        self.stop()
-        return self.connect()

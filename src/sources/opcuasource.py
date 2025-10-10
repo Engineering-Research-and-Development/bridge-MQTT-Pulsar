@@ -1,89 +1,66 @@
 import asyncio
+import time
 from multiprocessing import Queue
 from multiprocessing.synchronize import Event
 from loguru import logger
-from asyncua import Client, Node, ua
+from asyncua import Node, ua
 from asyncua.common.subscription import DataChangeNotif
 
 from ..core.message import Message
-from ..core.heartbeat import HeartbeatMixin
+from ..core.sourceconnection import OpcuaSourceConnection
 from .interfaces import ISource
 
 
-class OpcUaSource(ISource, HeartbeatMixin):
+class OpcUaSource(ISource):
     """
     Message source for collecting data from an OPC UA server by subscribing to node changes.
     """
 
     def __init__(self, config: dict):
         self.config = config
-        self.server_url = config["server_url"]
-        self.nodes_to_subscribe = config.get("nodes_to_subscribe", [])
-        self.publishing_interval = config.get("publishing_interval_ms", 500)
         self._message_queue: Queue | None = None
-
-        self.heartbeat_interval = config.get("heartbeat", {}).get(
-            "interval_seconds", 30
-        )
+        self._connector = OpcuaSourceConnection(config)
+        self._internal_shutdown_event = asyncio.Event()
 
     def run(self, message_queue: Queue, stop_event: Event) -> None:
         """The entry point for the dedicated process."""
-        if not self.nodes_to_subscribe:
-            logger.warning(
-                "OPC-UA: No nodes configured for subscription. Process will not start."
-            )
+        if not self.config.get("nodes_to_subscribe"):
+            logger.warning("OPC-UA: No nodes configured. Process will not start.")
             return
 
         self._message_queue = message_queue
-        try:
-            asyncio.run(self._main_async_task(stop_event))
-        except KeyboardInterrupt:
-            logger.info("OPC-UA: Process interrupted.")
-        except Exception:
-            logger.exception(
-                "OPC-UA: An unhandled exception occurred in the async worker."
-            )
-        finally:
-            logger.info("OPC-UA source has stopped.")
+        logger.info("OPC-UA source process started.")
+        while not stop_event.is_set():
+            try:
+                self._internal_shutdown_event.clear()
+                asyncio.run(self._main_async_task(stop_event))
+            except ConnectionError as e:
+                logger.warning(
+                    f"OPC-UA connection lost: {e}. Reconnecting in 5 seconds..."
+                )
+            except KeyboardInterrupt:
+                logger.info("OPC-UA: Process interrupted by user.")
+                break
+            except Exception:
+                logger.exception(
+                    "OPC-UA: An unhandled exception in the main loop. Restarting..."
+                )
+
+            if not stop_event.is_set():
+                time.sleep(5)  # Wait before attempting to reconnect
 
     async def _main_async_task(self, stop_event: Event):
         """The main async method that orchestrates the client's lifecycle."""
-        client = Client(url=self.server_url)
-        try:
-            async with client:
-                logger.success(f"OPC-UA: Successfully connected to {self.server_url}.")
-                subscription = await client.create_subscription(
-                    self.publishing_interval, self
-                )
-                nodes = [
-                    client.get_node(node_id) for node_id in self.nodes_to_subscribe
-                ]
-                await subscription.subscribe_data_change(nodes)
-                logger.success(
-                    f"OPC-UA: Subscription successful for {len(nodes)} nodes."
-                )
+        await self._connector.connect_and_run(
+            self, stop_event, self._internal_shutdown_event
+        )
 
-                logger.info("OPC-UA: Listening for data changes...")
-                while not stop_event.is_set():
-                    await asyncio.sleep(1)
-        except (OSError, asyncio.TimeoutError) as e:
-            logger.critical(f"OPC-UA: Failed to connect to server. Error: {e}")
-        except ua.UaError as e:
-            logger.error(
-                f"OPC-UA: Failed to subscribe to nodes. Error: {e}. Check Node IDs."
-            )
-        except Exception:
-            logger.exception("OPC-UA: A critical error occurred in the client task.")
-        finally:
-            logger.warning("OPC-UA: Client is disconnecting.")
-
-    # --- Data Callback ---
+    # --- Callbacks ---
 
     def datachange_notification(self, node: Node, val: any, data: DataChangeNotif):
         """Callback to handle data change and put message on the queue."""
         if not self._message_queue:
             return
-
         try:
             data_value = data.monitored_item.Value
             standardized_message = Message(
@@ -100,31 +77,16 @@ class OpcUaSource(ISource, HeartbeatMixin):
                 f"Error processing OPC-UA data change notification for node {node_id_str}."
             )
 
-    # --- Heartbeat ---
+    def status_change_notification(self, status: ua.StatusChangeNotification):
+        """
+        Callback to handle asyncua subscription when its status changes.
+        """
+        status_code = status.Status
+        logger.debug(f"OPC-UA subscription status changed to: {status_code}")
 
-    @property
-    def _is_healthy(self) -> bool:
-        if (
-            not self.client
-            or not self._loop
-            or not self._loop.is_running()
-            or not self._thread
-            or not self._thread.is_alive()
-        ):
-            return False
-        try:
-            health_check_node = self.client.get_node("i=2256")
-
-            future = asyncio.run_coroutine_threadsafe(
-                health_check_node.read_value(), self._loop
+        if status_code.is_bad():
+            logger.error(
+                f"OPC-UA subscription reported a bad status: {status_code}. "
+                "Signaling for a full reconnect."
             )
-
-            future.result(timeout=5)
-            return True
-        except Exception:
-            return False
-
-    def _perform_reconnect(self) -> bool:
-        logger.info("OPC-UA: Heartbeat failed, attempting to perform reconnection...")
-        self.stop()
-        return self.connect()
+            self._internal_shutdown_event.set()
