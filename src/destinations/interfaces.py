@@ -1,8 +1,22 @@
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from ..core.message import Message
 
 
-class IDestination:
+class IConnectable(ABC):
+    """Defines a contract for components that have a connect/stop lifecycle."""
+
+    @abstractmethod
+    def connect(self) -> bool:
+        """Establishes the connection to the endpoint."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def stop(self) -> None:
+        """Stops the component and cleans up resources."""
+        raise NotImplementedError
+
+
+class IDestination(IConnectable):
     """Defines a contract for any message destination (Pulsar, Kafka...)."""
 
     @abstractmethod

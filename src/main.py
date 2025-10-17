@@ -4,10 +4,10 @@ import yaml
 import argparse
 from loguru import logger
 
-from .orchestrator import Orchestrator
-from .sources.mqttsource import MqttSource
-from .sources.opcuasource import OpcUaSource
-from .destinations.pulsar import PulsarDestination
+from orchestrator import Orchestrator
+from sources.mqttsource import MqttSource
+from sources.opcuasource import OpcUaSource
+from destinations.pulsar import PulsarDestination
 
 
 def create_parser():
@@ -33,7 +33,7 @@ def load_config(path: str):
     try:
         with open(config_path, "r") as f:
             config = yaml.safe_load(f)
-            logger.info("Config loaded succesfully.")
+            logger.info("Config loaded successfully.")
             return config
     except FileNotFoundError:
         logger.critical(f"Config file not found in '{config_path}'")

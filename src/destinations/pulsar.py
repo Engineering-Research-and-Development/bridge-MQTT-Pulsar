@@ -102,7 +102,8 @@ class PulsarDestination(IDestination):
             )
             return None
 
-    def _send_message(self, producer: pulsar.Producer, payload: bytes):
+    @staticmethod
+    def _send_message(producer: pulsar.Producer, payload: bytes):
         try:
             logger.debug(
                 f"Attempting to send message to Pulsar topic '{producer.topic()}'..."
@@ -121,16 +122,16 @@ class PulsarDestination(IDestination):
     def _send_to_dlq(self, message: Message, reason: str):
         if not self.dlq_producer:
             logger.error(
-                f"DLQ producer is not available. Message from topic '{message.source_name}' will be lost."
+                f"DLQ producer is not available. Message from topic '{message.source_id}' will be lost."
             )
             return
 
         try:
             properties = {
-                "original_source": message.source_name,
+                "original_source": message.source_id,
                 "original_topic": message.topic,
                 "failure_reason": reason,
-                "timestamp_utc": message.timestamp_utc.isoformat(),
+                "timestamp_utc": message.timestamp.isoformat(),
             }
             self.dlq_producer.send(message.payload, properties=properties)
             logger.warning(

@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Any
-import datetime
+from datetime import datetime, timezone
 
 
 @dataclass(frozen=True)
@@ -14,5 +14,5 @@ class Message:
     topic: str
     payload: bytes
 
-    timestamp: datetime.datetime = field(default_factory=datetime.datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: dict[str, Any] = field(default_factory=dict)

@@ -108,10 +108,10 @@ class MqttHeartbeat(Heartbeat):
 
 class OpcuaHeartbeat(Heartbeat):
     def __init__(
-        self,
-        client: Client,
-        loop: asyncio.AbstractEventLoop,
-        shutdown_event: asyncio.Event,
+            self,
+            client: Client,
+            loop: asyncio.AbstractEventLoop,
+            shutdown_event: asyncio.Event,
     ):
         super().__init__()
         self.client = client
@@ -141,7 +141,7 @@ class OpcuaHeartbeat(Heartbeat):
 
         logger.info("OPC-UA: Signaling main async task to shut down for reconnect.")
         # Schedule the setting of the event on the main loop
-        self.loop.call_soon_threadsafe(self.shutdown_event.set)
+        self.loop.call_soon_threadsafe(lambda *args: self.shutdown_event.set(), ())
         return True
 
 

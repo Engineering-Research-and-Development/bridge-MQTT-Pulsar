@@ -44,7 +44,7 @@ class MqttSource(ISource):
 
         logger.info("MQTT source has stopped.")
 
-    def _internal_on_message(self, client, userdata, msg):
+    def _internal_on_message(self, msg):
         """Internal callback that works as an adapter and translator between Source and Publisher."""
         if self._message_queue:
             standardized_message = Message(

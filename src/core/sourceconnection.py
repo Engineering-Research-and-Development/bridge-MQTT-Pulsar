@@ -4,6 +4,10 @@ import paho.mqtt.client as mqtt
 
 from abc import ABC, abstractmethod
 from asyncua import Client, ua
+from asyncua.common.subscription import (
+    DataChangeNotificationHandler,
+    StatusChangeNotificationHandler,
+)
 from loguru import logger
 from multiprocessing.synchronize import Event
 from .heartbeat import MqttHeartbeat, OpcuaHeartbeat
@@ -91,10 +95,10 @@ class OpcuaSourceConnection:
         )
 
     async def connect_and_run(
-        self,
-        data_change_handler: object,
-        stop_event: Event,
-        external_shutdown_event: asyncio.Event,
+            self,
+            data_change_handler: DataChangeNotificationHandler | StatusChangeNotificationHandler,
+            stop_event: Event,
+            external_shutdown_event: asyncio.Event,
     ):
         """
         The main async method that orchestrates the client's lifecycle.
@@ -125,9 +129,9 @@ class OpcuaSourceConnection:
 
                 logger.info("OPC-UA: Listening for data changes...")
                 while (
-                    not stop_event.is_set()
-                    and not heartbeat_shutdown_event.is_set()
-                    and not external_shutdown_event.is_set()
+                        not stop_event.is_set()
+                        and not heartbeat_shutdown_event.is_set()
+                        and not external_shutdown_event.is_set()
                 ):
                     await asyncio.sleep(1)
 

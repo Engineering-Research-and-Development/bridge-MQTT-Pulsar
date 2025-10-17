@@ -3,6 +3,7 @@ import time
 from multiprocessing import Queue
 from multiprocessing.synchronize import Event
 from loguru import logger
+from typing import Any
 from asyncua import Node, ua
 from asyncua.common.subscription import DataChangeNotif
 
@@ -57,7 +58,7 @@ class OpcUaSource(ISource):
 
     # --- Callbacks ---
 
-    def datachange_notification(self, node: Node, val: any, data: DataChangeNotif):
+    def datachange_notification(self, node: Node, val: Any, data: DataChangeNotif):
         """Callback to handle data change and put message on the queue."""
         if not self._message_queue:
             return
