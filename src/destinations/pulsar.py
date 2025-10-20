@@ -1,9 +1,8 @@
 import pulsar
 from loguru import logger
 from tenacity import Retrying, stop_after_attempt, wait_exponential, RetryError
-from ..core.message import Message
-from ..core.heartbeat import PulsarHeartbeat
-from .interfaces import IDestination
+from src.core.message import Message
+from src.destinations.interfaces import IDestination
 
 
 class PulsarDestination(IDestination):
@@ -23,11 +22,6 @@ class PulsarDestination(IDestination):
         )
         self.dlq_topic = publishing_config.get("dlq_topic")
         self.dlq_producer: pulsar.Producer | None = None
-
-        self.heartbeat = PulsarHeartbeat(self)
-        self.heartbeat_interval = config.get("heartbeat", {}).get(
-            "interval_seconds", 30
-        )
 
     def connect(self) -> bool:
         if self.client:
@@ -52,8 +46,6 @@ class PulsarDestination(IDestination):
             logger.success(
                 f"Successfully connected to Pulsar service at {self.config['service_url']}"
             )
-
-            self.heartbeat.start(self.heartbeat_interval)
 
             return True
         except (pulsar.ConnectError, pulsar.Timeout) as e:
@@ -165,7 +157,6 @@ class PulsarDestination(IDestination):
     def stop(self):
         logger.info("Closing all Pulsar producers...")
         logger.debug(f"Closing {len(self.producers)} Pulsar producers.")
-        self.heartbeat.stop()
         for topic, producer in self.producers.items():
             try:
                 producer.close()

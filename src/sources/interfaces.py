@@ -1,5 +1,5 @@
 from abc import ABC
-from ..core.process import IProcess
+from src.core.process import IProcess
 
 
 class ISource(IProcess, ABC):

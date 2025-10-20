@@ -3,9 +3,9 @@ from multiprocessing import Queue
 from multiprocessing.synchronize import Event
 from loguru import logger
 
-from .interfaces import ISource
-from ..core.message import Message
-from ..core.sourceconnection import MqttSourceConnection
+from src.sources.interfaces import ISource
+from src.core.message import Message
+from src.core.sourceconnection import MqttSourceConnection
 
 
 class MqttSource(ISource):
@@ -44,7 +44,7 @@ class MqttSource(ISource):
 
         logger.info("MQTT source has stopped.")
 
-    def _internal_on_message(self, msg):
+    def _internal_on_message(self, client, userdata, msg):
         """Internal callback that works as an adapter and translator between Source and Publisher."""
         if self._message_queue:
             standardized_message = Message(

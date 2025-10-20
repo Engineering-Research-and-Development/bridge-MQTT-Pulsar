@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from ..core.message import Message
+from src.core.message import Message
 
 
 class IConnectable(ABC):

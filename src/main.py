@@ -4,10 +4,10 @@ import yaml
 import argparse
 from loguru import logger
 
-from orchestrator import Orchestrator
-from sources.mqttsource import MqttSource
-from sources.opcuasource import OpcUaSource
-from destinations.pulsar import PulsarDestination
+from src.orchestrator import Orchestrator
+from src.sources.mqttsource import MqttSource
+from src.sources.opcuasource import OpcUaSource
+from src.destinations.pulsar import PulsarDestination
 
 
 def create_parser():

@@ -143,25 +143,3 @@ class OpcuaHeartbeat(Heartbeat):
         # Schedule the setting of the event on the main loop
         self.loop.call_soon_threadsafe(lambda *args: self.shutdown_event.set(), ())
         return True
-
-
-class PulsarHeartbeat(Heartbeat):
-    def __init__(self, pulsar_destination):
-        super().__init__()
-        self.pulsar_destination = pulsar_destination
-
-    def _is_healthy(self) -> bool:
-        client = self.pulsar_destination.client
-        if not client:
-            return False
-        try:
-            client.get_topic_partitions(
-                "persistent://public/default/health-check-heartbeat"
-            )
-            return True
-        except Exception:
-            return False
-
-    def _perform_reconnect(self) -> bool:
-        logger.info("Pulsar: Attempting to perform reconnection...")
-        return self.pulsar_destination.connect()

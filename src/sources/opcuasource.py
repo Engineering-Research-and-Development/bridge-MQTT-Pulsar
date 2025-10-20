@@ -7,9 +7,9 @@ from typing import Any
 from asyncua import Node, ua
 from asyncua.common.subscription import DataChangeNotif
 
-from ..core.message import Message
-from ..core.sourceconnection import OpcuaSourceConnection
-from .interfaces import ISource
+from src.core.message import Message
+from src.core.sourceconnection import OpcuaSourceConnection
+from src.sources.interfaces import ISource
 
 
 class OpcUaSource(ISource):

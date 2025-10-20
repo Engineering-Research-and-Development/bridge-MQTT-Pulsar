@@ -10,7 +10,7 @@ from asyncua.common.subscription import (
 )
 from loguru import logger
 from multiprocessing.synchronize import Event
-from .heartbeat import MqttHeartbeat, OpcuaHeartbeat
+from src.core.heartbeat import MqttHeartbeat, OpcuaHeartbeat
 
 
 class ISourceConnection(ABC):

@@ -5,9 +5,9 @@ from multiprocessing import Queue
 from multiprocessing.synchronize import Event
 from loguru import logger
 
-from destinations.interfaces import IDestination
-from sources.interfaces import ISource
-from core.message import Message
+from src.destinations.interfaces import IDestination
+from src.sources.interfaces import ISource
+from src.core.message import Message
 
 
 def source_process_worker(source: ISource, message_queue: mp.Queue, stop_event: Event):
