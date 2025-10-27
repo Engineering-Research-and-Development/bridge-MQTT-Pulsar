@@ -1,10 +1,10 @@
 # Available levels: DEBUG, INFO, SUCCESS, WARNING, ERROR, CRITICAL
 logging:
-  level: "DEBUG"
+  level: "INFO"
 
 sources:
   opcua:
-    enabled: false
+    enabled: true
     server_url: "opc.tcp://host.docker.internal:4840/OPCUA/SimulationServer" #test values
     nodes_to_subscribe:
       - "ns=3;i=1001"
