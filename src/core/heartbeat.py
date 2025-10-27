@@ -108,10 +108,10 @@ class MqttHeartbeat(Heartbeat):
 
 class OpcuaHeartbeat(Heartbeat):
     def __init__(
-            self,
-            client: Client,
-            loop: asyncio.AbstractEventLoop,
-            shutdown_event: asyncio.Event,
+        self,
+        client: Client,
+        loop: asyncio.AbstractEventLoop,
+        shutdown_event: asyncio.Event,
     ):
         super().__init__()
         self.client = client
